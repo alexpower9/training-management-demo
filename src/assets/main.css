@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,100..900;1,100..900&display=swap');
 @import './base.css';
 @import "tailwindcss";
 @plugin "daisyui";
@@ -52,8 +53,9 @@
   --border: 1px;
   --depth: 1;
   --noise: 0;
-
-  --font-display: "Oswald", "sans-serif"
+  
+  --font-family: 'Raleway', sans-serif;         /* Base font */
+  --font-family-title: 'Raleway', sans-serif;
 }
 
 /* All input code also goes here */
@@ -61,3 +63,15 @@
   --color-background: #305292;
   --color-backround-yellow: #00000;
 } */
+
+:root {
+  font-family: 'Raleway', sans-serif !important;
+}
+
+body, html, button, input, select, textarea, .menu, .navbar {
+  font-family: 'Raleway', sans-serif !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Raleway', sans-serif !important;
+}
