@@ -9,7 +9,7 @@
   color-scheme: light;    /* browser UI */
 
   /* base (background / surface) */
-  --color-base-100: oklch(0.4588 0.1332 249.88);
+  --color-base-100: oklch(39.39% 0.095 247.04); /* navy background */
   --color-base-200: oklch(0.3961 0.1332 249.88);
   --color-base-300: oklch(0.2923 0.1332 249.88);
   --color-base-content: oklch(19% 0.21 270);   /* deep navy text */
