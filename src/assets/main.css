@@ -1,35 +1,63 @@
 @import './base.css';
+@import "tailwindcss";
+@plugin "daisyui";
+@plugin "daisyui/theme" {
+  name: "nme";
+  default: true;          /* set as default */
+  prefersdark: false;     /* light by default */
+  color-scheme: light;    /* browser UI */
 
-#app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  font-weight: normal;
+  /* base (background / surface) */
+  --color-base-100: oklch(0.4588 0.1332 249.88);
+  --color-base-200: oklch(0.3961 0.1332 249.88);
+  --color-base-300: oklch(0.2923 0.1332 249.88);
+  --color-base-content: oklch(19% 0.21 270);   /* deep navy text */
+
+  /* brand colours */
+  --color-primary: oklch(19% 0.21 270);        /* NAVY */
+  --color-primary-content: oklch(100% 0 0);    /* white text */
+
+  --color-secondary: oklch(0.7967 0.1458 93.18);       /* RICH GOLD */
+  --color-secondary-content: oklch(100% 0 0);  /* white text */
+
+  --color-accent: oklch(86% 0.69 88);          /* bright accent gold */
+  --color-accent-content: oklch(19% 0.21 270); /* navy text */
+
+  /* neutral greys / dark surfaces */
+  --color-neutral: oklch(25% 0.22 278);        /* muted navy‑grey */
+  --color-neutral-content: oklch(100% 0 0);
+
+  /* functional states */
+  --color-info: oklch(46% 0.60 284);
+  --color-info-content: oklch(100% 0 0);
+
+  --color-success: oklch(60% 0.49 157);
+  --color-success-content: oklch(100% 0 0);
+
+  --color-warning: oklch(80% 0.69 80);
+  --color-warning-content: oklch(19% 0.21 270);
+
+  --color-error: oklch(57% 0.65 28);
+  --color-error-content: oklch(100% 0 0);
+
+  /* radii & sizing */
+  --radius-selector: 1rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.5rem;
+
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+
+  /* border & effects */
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+
+  --font-display: "Oswald", "sans-serif"
 }
 
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
-}
-
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
-  }
-}
-
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
-
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
-  }
-}
+/* All input code also goes here */
+/* @theme {
+  --color-background: #305292;
+  --color-backround-yellow: #00000;
+} */
