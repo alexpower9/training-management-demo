@@ -18,7 +18,7 @@ const navigateTo = (route) => {
     <img @click="navigateTo('/')" :src="logoPath" class="h-20 w-auto cursor-pointer"/>
   </div>
   <div class="flex-none">
-    <ul class="menu menu-horizontal px-3 text-base-100 text-xl gap-8">
+    <ul class="menu menu-horizontal px-1 text-base-100 text-lg">
       <li><a @click="navigateTo('/training')" class="cursor-pointer !font-medium">Training</a></li>
       <li><a @click="navigateTo('/schedule')" class="cursor-pointer !font-medium">Schedule</a></li>
     </ul>
