@@ -18,24 +18,27 @@
   --color-primary: oklch(19% 0.21 270);        /* NAVY */
   --color-primary-content: oklch(100% 0 0);    /* white text */
 
-  --color-secondary: oklch(0.7967 0.1458 93.18);       /* RICH GOLD */
+  --color-secondary: oklch(0.7967 0.1458 93.18);      /* RICH GOLD */
+  --color-secondary-light: oklch(0.7967 0.091 93.18);
   --color-secondary-content: oklch(100% 0 0);  /* white text */
 
   --color-accent: oklch(86% 0.69 88);          /* bright accent gold */
   --color-accent-content: oklch(19% 0.21 270); /* navy text */
 
   /* neutral greys / dark surfaces */
-  --color-neutral: oklch(25% 0.22 278);        /* muted navy‑grey */
-  --color-neutral-content: oklch(100% 0 0);
+  --color-neutral: oklch(0.74 0 32.82 / 50.36%);       /* muted navy‑grey */
+  --color-neutral-content: oklch();
 
   /* functional states */
   --color-info: oklch(46% 0.60 284);
   --color-info-content: oklch(100% 0 0);
 
-  --color-success: oklch(60% 0.49 157);
+  --color-success-dark: oklch(0.7559 0.2245 142.94);
+  --color-success-light: oklch(0.7471 0.1385 142.94);
   --color-success-content: oklch(100% 0 0);
 
-  --color-warning: oklch(80% 0.69 80);
+  --color-warning-dark: oklch(0.5444 0.2234 29.23);
+  --color-warning-light: oklch(0.6765 0.1554 29.23);
   --color-warning-content: oklch(19% 0.21 270);
 
   --color-error: oklch(57% 0.65 28);
@@ -66,6 +69,13 @@
 
 :root {
   font-family: 'Raleway', sans-serif !important;
+  --color-success-dark: oklch(0.7559 0.2245 142.94);
+  --color-success-light: oklch(0.7471 0.1385 142.94);
+  --color-success-content: oklch(100% 0 0);
+
+  --color-warning-dark: oklch(0.5444 0.2234 29.23);
+  --color-warning-light: oklch(0.6765 0.1554 29.23);
+  --color-warning-content: oklch(19% 0.21 270);
 }
 
 body, html, button, input, select, textarea, .menu, .navbar {
@@ -75,3 +85,15 @@ body, html, button, input, select, textarea, .menu, .navbar {
 h1, h2, h3, h4, h5, h6 {
   font-family: 'Raleway', sans-serif !important;
 }
+
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+/* * {
+  outline: solid red 1px;
+} */
