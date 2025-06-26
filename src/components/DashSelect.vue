@@ -4,6 +4,7 @@ import { ref } from 'vue';
 // Options for the selector
 const options = [
   { id: 'status', label: 'Status' },
+  {id: 'mandatory', label: 'Mandatory'},
   { id: 'modify', label: 'Modify' }
 ];
 
