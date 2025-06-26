@@ -50,7 +50,7 @@ const computedStyles = computed(() => {
 <template>
   <!--This will serve as the base dashboard card-->
   <div 
-    class="bg-secondary rounded-lg shadow-md p-6" 
+    class="bg-secondary rounded-lg shadow-md p-6 flex flex-col" 
     :class="[customClass, { 'w-full': fullWidth }]"
     :style="computedStyles"
   >
@@ -58,7 +58,7 @@ const computedStyles = computed(() => {
     <h3 v-if="title" class="text-lg font-semibold mb-4 text-basecard-text">{{ title }}</h3>
     
     <!-- Default slot for content -->
-    <div class="card-content h-full">
+    <div class="card-content flex-grow">
       <slot></slot>
     </div>
   </div>

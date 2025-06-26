@@ -2,6 +2,7 @@
 import {ref} from 'vue'
 import DashSelect from '@/components/DashSelect.vue';
 import Dashboard from '@/components/Dashboard.vue';
+import Mandatory from '@/components/Mandatory.vue';
 
 const currentMode = ref('status');
 
@@ -29,6 +30,10 @@ const handleModeChange = (mode) => {
                 <p class="text-base-content/70">Modification interface will be implemented here.</p>
             </div>
             </div>
+            
+            <Mandatory v-else-if="currentMode === 'mandatory'"/>
+
+
         </div>
     </div>
 </template>
