@@ -209,12 +209,16 @@ onBeforeUnmount(() => document.removeEventListener('click', closeDropdown));
             : 'bg-[oklch(0.6765_0.1554_29.23)]'">
           <span class="text-white font-medium">{{ emp.name }}</span>
           <span
-            class="badge text-white font-medium border-0"
+            class="badge badge-xs font-medium text-white border-0 flex-shrink-0
+                  px-2"
             :class="emp.completed
               ? 'bg-[oklch(0.7559_0.2245_142.94)]'
               : 'bg-[oklch(0.5444_0.2234_29.23)]'">
             {{ emp.completed ? 'Completed' : 'Incomplete' }}
           </span>
+
+
+ 
         </div>
 
         <!-- empty state -->

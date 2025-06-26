@@ -57,16 +57,16 @@ const handleCourseSelected = (course) => {
 <template>
   <div class="overflow-hidden flex-grow w-full bg-base-100 pt-1 px-7 pb-7 min-h-[calc(100vh-80px)]">
     <!-- Use a responsive grid layout that changes based on screen size -->
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+    <div class="grid grid-cols-1 xl:grid-cols-5 gap-6">
       <!-- Left column for CourseSelect and ProgressCard (takes 3/5 on large screens) -->
-      <div class="lg:col-span-3 flex flex-col gap-6">
+      <div class="xl:col-span-3 flex flex-col gap-6">
         <CourseSelect @update:selected-course="handleCourseSelected"/>
         <MandatoryCourseProgress/>
         <!-- <ProgressCard @update:selected-customer="handleCustomerSelected"/> -->
       </div>
       
       <!-- Right column for CoursesAvailable (takes 2/5 on large screens) -->
-      <div class="lg:col-span-2">
+      <div class="xl:col-span-2">
         <MandatoryEmployeeCompletion/>
       </div>
     </div>
