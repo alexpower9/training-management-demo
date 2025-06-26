@@ -113,7 +113,7 @@ function getExpiryDateForCourse(courseId) {
 </script>
 
 <template>
-  <DashCard customClass="courses-available-card h-full" maxWidth="800">
+  <DashCard customClass="courses-available-card w-full">
     <!-- Header section -->
     <div class="flex items-center mb-6">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-primary mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -143,8 +143,8 @@ function getExpiryDateForCourse(courseId) {
       </div>
       
       <!-- Empty state when no courses are available -->
-      <div v-else class="bg-base-100 p-4 rounded-lg text-center">
-        <p class="text-primary">No courses available for this customer.</p>
+      <div v-else class="bg-white p-4 rounded-lg text-center">
+        <p class="text-primary">Please select a customer.</p>
       </div>
     </div>
 
