@@ -60,10 +60,13 @@ const progressData = computed(() => {
     </div>
     
     <!-- Empty state if no course is selected -->
-    <div v-else class="bg-primary-content p-2 rounded-lg flex flex-col items-center justify-center shadow-sm ">
+    <div v-else>
+      <div class="h-3"/>
+      <div class="bg-primary-content p-2 rounded-lg flex flex-col items-center justify-center shadow-sm">
       <p class="text-primary/60 text-center">
         Select a course to view completion progress
       </p>
+    </div>
     </div>
   </DashCard>
 </template>

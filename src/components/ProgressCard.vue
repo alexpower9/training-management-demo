@@ -276,12 +276,14 @@ const coursesWithStatus = computed(() => {
         </div>
       
       <!-- Empty state if no employee or customer is selected -->
-      <div v-else class="bg-primary-content p-2 rounded-lg flex flex-col items-center justify-center shadow-sm">
-       
+      <div v-else> 
+        <div class="h-3"/>
+        <div class="bg-primary-content p-2 rounded-lg flex flex-col items-center justify-center shadow-sm">
         <p class="text-primary/60">
           <span v-if="!selectedEmployee">No employee selected. Please select an employee first.</span>
           <span v-else-if="!selectedCustomer">Select a customer to view training progress.</span>
         </p>
+      </div>
       </div>
     </DashCard>
   </template>

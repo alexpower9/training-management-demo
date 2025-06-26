@@ -149,10 +149,13 @@ function getExpiryDateForCourse(courseId) {
     </div>
 
     <!-- Empty state if customer is not selected -->
-    <div v-else class="bg-primary-content p-2 rounded-lg flex flex-col items-center justify-center shadow-sm flex-grow">
+    <div v-else>
+      <div class="h-3"></div>
+      <div class="bg-primary-content p-2 rounded-lg flex flex-col items-center justify-center shadow-sm flex-grow">
       <p class="text-primary/60">
         Select a customer to view available courses.
       </p>
+    </div>
     </div>
   </DashCard>
 </template>

@@ -125,8 +125,11 @@ onMounted(() => {
     </div>
     
     <!-- Empty state if no employee is selected -->
-    <div v-else class="bg-primary-content p-2 rounded-lg flex items-center justify-center shadow-sm">
+    <div v-else>
+      <div class="h-3"/>
+      <div class="bg-primary-content p-2 rounded-lg flex items-center justify-center shadow-sm">
       <p class="text-primary/60">Select an employee to view details</p>
+    </div>
     </div>
   </DashCard>
 </template>
