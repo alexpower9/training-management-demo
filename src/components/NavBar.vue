@@ -13,7 +13,7 @@ const navigateTo = (route) => {
 </script>
 
 <template>
-    <div class="navbar bg-secondary shadow-sm">
+<div class="navbar bg-secondary shadow-sm">
   <div class="flex-1 flex items-center gap-3 pl-4">
     <img @click="navigateTo('/')" :src="logoPath" class="h-20 w-auto cursor-pointer"/>
   </div>

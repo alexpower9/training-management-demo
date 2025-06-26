@@ -58,7 +58,7 @@ const computedStyles = computed(() => {
     <h3 v-if="title" class="text-lg font-semibold mb-4 text-basecard-text">{{ title }}</h3>
     
     <!-- Default slot for content -->
-    <div class="card-content">
+    <div class="card-content h-full">
       <slot></slot>
     </div>
   </div>

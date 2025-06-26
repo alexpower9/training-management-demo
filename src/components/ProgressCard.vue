@@ -1,9 +1,22 @@
 <script setup>
 import DashCard from './DashCard.vue';
-import { ref, computed, watch, inject, onMounted } from 'vue';
+import { ref, provide, computed, watch, inject, onMounted } from 'vue';
 
 const injectedEmployee = inject('selectedEmployee', null);
 const selectedEmployee = ref(injectedEmployee || null);
+
+const selectedCustomer = ref(null);
+const searchQuery = ref('');
+const isDropdownOpen = ref(false);
+
+// Modify the selectCustomer function to include:
+const selectCustomer = (customer) => {
+  selectedCustomer.value = customer;
+  isDropdownOpen.value = false;
+  searchQuery.value = '';
+  emit('update:selectedCustomer', customer);
+};
+
 
 // Watch for changes in injected employee
 if (injectedEmployee) {
@@ -66,15 +79,12 @@ const courseCompletions = ref([
   { employeeId: 3, courseId: 8, completed: false }
 ]);
 
-const selectedCustomer = ref(null);
-const searchQuery = ref('');
-const isDropdownOpen = ref(false);
 
-onMounted(() => {
-  if (customers.value.length > 0) {
-    selectedCustomer.value = customers.value[0];
-  }
-});
+// onMounted(() => {
+//   if (customers.value.length > 0) {
+//     selectedCustomer.value = customers.value[0];
+//   }
+// });
 
 const filteredCustomers = computed(() => {
   if (!searchQuery.value) return customers.value;
@@ -84,11 +94,10 @@ const filteredCustomers = computed(() => {
   );
 });
 
-const selectCustomer = (customer) => {
-  selectedCustomer.value = customer;
-  isDropdownOpen.value = false;
-  searchQuery.value = '';
-};
+provide('selectedCustomer', selectedCustomer);
+provide('courseCompletions', courseCompletions);
+
+const emit = defineEmits(['update:selectedCustomer']);
 
 const toggleDropdown = () => {
   isDropdownOpen.value = !isDropdownOpen.value;
@@ -173,10 +182,10 @@ const coursesWithStatus = computed(() => {
       <div class="flex items-center justify-between mb-6">
         <!-- Chart icon on the left with navy color -->
         <div class="flex items-center">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-primary mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
-          <span class="font-bold text-primary pl-3">Training Progress</span>
+          <span class="font-bold text-primary pl-1">Training Progress</span>
         </div>
         
         <!-- Dropdown on the right -->
@@ -185,8 +194,8 @@ const coursesWithStatus = computed(() => {
             @click.stop="toggleDropdown" 
             class="flex items-center px-4 py-2 border border-primary/20 rounded-md bg-primary-content hover:bg-base-200 transition-colors duration-200 text-primary font-medium"
           >
-            <span v-if="selectedCustomer">{{ selectedCustomer.name }}</span>
-            <span v-else>Select Customer</span>
+            <span v-if="selectedCustomer" class="text-sm">{{ selectedCustomer.name }}</span>
+            <span v-else class="text-sm">Select Customer</span>
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
             </svg>
@@ -241,7 +250,7 @@ const coursesWithStatus = computed(() => {
         </p>
         
         <!-- Course List with updated colors -->
-       <div class="mt-4">
+       <!-- <div class="mt-4">
         <h4 class="text-base font-semibold mb-2 mt-4 text-primary">Required Courses</h4>
         <div class="space-y-2">
           <div 
@@ -263,11 +272,12 @@ const coursesWithStatus = computed(() => {
             </span>
           </div>
         </div>
-        </div>
+        </div> -->
         </div>
       
       <!-- Empty state if no employee or customer is selected -->
-      <div v-else class="bg-primary-content p-4 rounded-lg flex flex-col items-center justify-center shadow-sm">
+      <div v-else class="bg-primary-content p-2 rounded-lg flex flex-col items-center justify-center shadow-sm">
+       
         <p class="text-primary/60">
           <span v-if="!selectedEmployee">No employee selected. Please select an employee first.</span>
           <span v-else-if="!selectedCustomer">Select a customer to view training progress.</span>

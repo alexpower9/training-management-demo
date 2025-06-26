@@ -14,12 +14,12 @@ const selectedEmployee = ref(null);
 const searchQuery = ref('');
 const isDropdownOpen = ref(false);
 
-onMounted(() => {
-  if (employees.value.length > 0) {
-    selectedEmployee.value = employees.value[0];
-    emit('update:selectedEmployee', selectedEmployee.value);
-  }
-});
+// onMounted(() => {
+//   if (employees.value.length > 0) {
+//     selectedEmployee.value = employees.value[0];
+//     emit('update:selectedEmployee', selectedEmployee.value);
+//   }
+// });
 
 provide('selectedEmployee', selectedEmployee);
 
@@ -64,7 +64,7 @@ onMounted(() => {
         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-primary mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
         </svg>
-        <span class="font-bold text-primary pl-3">Employee</span>
+        <span class="font-bold text-primary pl-1">Employee</span>
       </div>
       
       <!-- Dropdown on the right -->
@@ -125,7 +125,7 @@ onMounted(() => {
     </div>
     
     <!-- Empty state if no employee is selected -->
-    <div v-else class="bg-primary-content p-4 rounded-lg flex items-center justify-center shadow-sm">
+    <div v-else class="bg-primary-content p-2 rounded-lg flex items-center justify-center shadow-sm">
       <p class="text-primary/60">Select an employee to view details</p>
     </div>
   </DashCard>
