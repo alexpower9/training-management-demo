@@ -59,7 +59,7 @@ const handleCourseSelected = (course) => {
     <!-- Use a responsive grid layout that changes based on screen size -->
     <div class="grid grid-cols-1 xl:grid-cols-5 gap-6">
       <!-- Left column for CourseSelect and ProgressCard (takes 3/5 on large screens) -->
-      <div class="xl:col-span-3 flex flex-col gap-6">
+      <div class="xl:col-span-2 flex flex-col gap-6">
         <CourseSelect @update:selected-course="handleCourseSelected"/>
         <MandatoryCourseProgress/>
         <!-- <ProgressCard @update:selected-customer="handleCustomerSelected"/> -->
