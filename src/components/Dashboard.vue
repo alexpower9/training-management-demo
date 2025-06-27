@@ -52,7 +52,7 @@ const handleCustomerSelected = (customer) => {
     <!-- Use a responsive grid layout that changes based on screen size -->
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
       <!-- Left column for EmployeeCard and ProgressCard (takes 3/5 on large screens) -->
-      <div class="lg:col-span-3 flex flex-col gap-6">
+      <div class="lg:col-span-2 flex flex-col gap-6">
         <EmployeeCard @update:selected-employee="handleEmployeeSelected"/>
         <ProgressCard @update:selected-customer="handleCustomerSelected"/>
       </div>
