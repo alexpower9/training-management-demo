@@ -224,8 +224,8 @@ onBeforeUnmount(() => document.removeEventListener('click', closeDropdown));
         <!-- empty state -->
         <div
           v-if="filteredEmployees.length === 0"
-          class="bg-base-100 p-4 rounded-lg text-center md:col-span-2">
-          <p class="text-primary">
+          class="bg-[oklch(0.6765_0.1554_29.23)] p-4 rounded-lg text-center md:col-span-2">
+          <p class="text-white">
             <span v-if="viewMode === 'complete'">No completed employees found</span>
             <span v-else-if="viewMode === 'incomplete'">No incomplete employees found</span>
             <span v-else>No employees found</span>
