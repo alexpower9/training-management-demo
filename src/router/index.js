@@ -1,23 +1,74 @@
-import { createRouter, createWebHistory } from "vue-router";
-import HomePage from "@/views/HomePage.vue";
-import Training from "@/views/Training.vue";
+import { createRouter, createWebHistory } from 'vue-router';
+import { auth, initializeAuth, signIn } from '@/auth/auth';
+import AuthCallback from '@/views/AuthCallback.vue';
+import AuthConfiguration from '@/views/AuthConfiguration.vue';
+import Manage from '@/views/Manage.vue';
+import Training from '@/views/Training.vue';
 
 const routes = [
   {
     path: '/',
-    name: 'home',
-    component: HomePage
+    redirect: '/training',
   },
   {
     path: '/training',
     name: 'training',
-    component: Training
-  }
-]
+    component: Training,
+    meta: {
+      requiresAuth: true,
+    },
+  },
+  {
+    path: '/manage',
+    name: 'manage',
+    component: Manage,
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+    },
+  },
+  {
+    path: '/auth/callback',
+    name: 'auth-callback',
+    component: AuthCallback,
+  },
+  {
+    path: '/auth/configuration',
+    name: 'auth-configuration',
+    component: AuthConfiguration,
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/training',
+  },
+];
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL), 
-  routes
-})
+  history: createWebHistory(import.meta.env.BASE_URL),
+  routes,
+});
 
-export default router
+router.beforeEach(async (to) => {
+  await initializeAuth();
+
+  if (to.name === 'auth-callback' || to.name === 'auth-configuration') {
+    return true;
+  }
+
+  if (auth.state.configurationError) {
+    return { name: 'auth-configuration' };
+  }
+
+  if (to.meta.requiresAuth && !auth.state.isAuthenticated) {
+    await signIn(to.fullPath);
+    return false;
+  }
+
+  if (to.meta.requiresAdmin && !auth.canManage.value) {
+    return { name: 'training' };
+  }
+
+  return true;
+});
+
+export default router;
