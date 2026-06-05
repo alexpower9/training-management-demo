@@ -49,7 +49,6 @@ provide('selectedCourse', selectedCourse);
 // Handler function for when a course is selected
 const handleCourseSelected = (course) => {
   selectedCourse.value = course;
-  console.log('Course selected:', course);
 }
 
 </script>

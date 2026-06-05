@@ -1,11 +1,17 @@
 <script setup>
 import {computed} from 'vue'
 import {useRouter} from 'vue-router'
+import drill1Url from '@/assets/drill1.jpg';
+import drill2Url from '@/assets/drill2.jpg';
+
+const imageUrls = {
+  'drill1.jpg': drill1Url,
+  'drill2.jpg': drill2Url,
+};
 
 
 const router = useRouter()
 const navigateTo = (route) => {
-    console.log("Went to route")
     router.push(route)
 }
 
@@ -32,7 +38,7 @@ const props = defineProps({
 })
 
 const fullImagePath = computed(() => {
-    return `/src/assets/${props.img_path}`
+    return imageUrls[props.img_path] || drill2Url
 })
 
 </script>

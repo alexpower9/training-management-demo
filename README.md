@@ -1,33 +1,35 @@
 # nme-fe
-<<<<<<< HEAD
-Front end for the Northern Mining Equipment application
-=======
 
-This template should help get you started developing with Vue 3 in Vite.
-
-## Recommended IDE Setup
-
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
+Front end for the Northern Mining Equipment training compliance MVP.
 
 ## Project Setup
+
+Install dependencies:
 
 ```sh
 npm install
 ```
 
-### Compile and Hot-Reload for Development
+Start the local development server:
 
 ```sh
 npm run dev
 ```
 
-### Compile and Minify for Production
+Create a production build:
 
 ```sh
 npm run build
 ```
->>>>>>> master
+
+Preview the production build locally:
+
+```sh
+npm run preview
+```
+
+## MVP Notes
+
+- The current MVP focuses on NME staff training compliance workflows.
+- Demo data is static and lives in `src/data/trainingDemoData.js`.
+- Schedule functionality is intentionally out of scope for the first customer demo.

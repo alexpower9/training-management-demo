@@ -42,7 +42,6 @@ const handleEmployeeSelected = (employee) => {
 };
 
 const handleCustomerSelected = (customer) => {
-  console.log('Customer selected in Dashboard:', customer);
   selectedCustomer.value = customer;
 };
 </script>

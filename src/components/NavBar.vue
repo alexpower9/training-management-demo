@@ -1,27 +1,24 @@
 <script setup>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router';
-
-const logoPath = ref('/src/assets/nme-logo.png');
-
-const router = useRouter()
-const navigateTo = (route) => {
-    console.log("Went to route")
-    router.push(route)
-}
-
+import logoUrl from '@/assets/nme-logo.png';
 </script>
 
 <template>
-<div class="navbar bg-secondary shadow-sm">
-  <div class="flex-1 flex items-center gap-3 pl-4">
-    <img @click="navigateTo('/')" :src="logoPath" class="h-20 w-auto cursor-pointer"/>
-  </div>
-  <div class="flex-none">
-    <ul class="menu menu-horizontal px-1 text-base-100 text-lg">
-      <li><a @click="navigateTo('/training')" class="cursor-pointer !font-medium">Training</a></li>
-      <li><a @click="navigateTo('/schedule')" class="cursor-pointer !font-medium">Schedule</a></li>
-    </ul>
-  </div>
-</div>
+  <header class="app-header">
+    <RouterLink to="/" class="brand-link" aria-label="Northern Mining Equipment dashboard">
+      <img :src="logoUrl" alt="Northern Mining Equipment" class="brand-logo" />
+      <span class="brand-text">
+        <span class="brand-name">Northern Mining Equipment</span>
+        <span class="brand-product">Training Compliance MVP</span>
+      </span>
+    </RouterLink>
+
+    <nav class="app-nav" aria-label="Primary navigation">
+      <RouterLink to="/" class="nav-link" active-class="is-active" exact-active-class="is-active">
+        Dashboard
+      </RouterLink>
+      <RouterLink to="/training" class="nav-link" active-class="is-active">
+        Training
+      </RouterLink>
+    </nav>
+  </header>
 </template>
