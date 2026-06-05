@@ -1,52 +1,27 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import StatusBadge from '@/components/StatusBadge.vue';
 import {
-  customerCourses,
-  customers,
-  employees,
   formatDate,
-  getCustomerEligibilitySummaries,
-  getCustomerTrainingRows,
-  referenceDate,
+  sortReadiness,
   statusMeta,
+  summarizeEmployeeReadiness,
 } from '@/data/trainingDemoData';
+import { trainingRepository } from '@/services/trainingRepository';
 
-const selectedCustomerId = ref('all');
+const employees = ref([]);
+const sites = ref([]);
+const siteCourses = ref([]);
+const siteSummaries = ref([]);
+const selectedSiteId = ref('all');
 const selectedEmployeeId = ref('all');
 const selectedCourseId = ref('all');
 const selectedStatus = ref('all');
 const selectedSummaryId = ref(null);
+const loading = ref(false);
+const errorMessage = ref('');
 
-const hasSelectedCustomer = computed(() => selectedCustomerId.value !== 'all');
-const availableCourses = computed(() => {
-  if (!hasSelectedCustomer.value) {
-    return [];
-  }
-
-  return customerCourses.filter((course) => course.customerId === selectedCustomerId.value);
-});
-const customerTrainingRows = computed(() =>
-  hasSelectedCustomer.value ? getCustomerTrainingRows(selectedCustomerId.value) : [],
-);
-const summaryRows = computed(() => {
-  if (selectedCourseId.value === 'all') {
-    return customerTrainingRows.value;
-  }
-
-  return customerTrainingRows.value.filter((row) => row.courseId === selectedCourseId.value);
-});
-const customerEmployeeSummaries = computed(() =>
-  hasSelectedCustomer.value
-    ? getCustomerEligibilitySummaries(selectedCustomerId.value, summaryRows.value)
-    : [],
-);
-const fullCustomerSummaries = computed(() =>
-  hasSelectedCustomer.value
-    ? getCustomerEligibilitySummaries(selectedCustomerId.value, customerTrainingRows.value)
-    : [],
-);
-
+const hasSelectedSite = computed(() => selectedSiteId.value !== 'all');
 const statusOptions = computed(() =>
   Object.entries(statusMeta).map(([value, meta]) => ({
     value,
@@ -54,45 +29,74 @@ const statusOptions = computed(() =>
   })),
 );
 
-const filteredSummaries = computed(() => {
-  if (!hasSelectedCustomer.value) {
-    return [];
+const courseScopedSummaries = computed(() => {
+  if (selectedCourseId.value === 'all') {
+    return siteSummaries.value;
   }
 
-  return customerEmployeeSummaries.value.filter((summary) => {
+  return siteSummaries.value
+    .map((summary) =>
+      summarizeEmployeeReadiness(
+        summary.employee,
+        summary.customer,
+        summary.site,
+        summary.courses.filter((row) => row.courseId === selectedCourseId.value),
+      ),
+    )
+    .sort(sortReadiness);
+});
+
+const filteredSummaries = computed(() =>
+  courseScopedSummaries.value.filter((summary) => {
     if (selectedEmployeeId.value !== 'all' && summary.employee.id !== selectedEmployeeId.value) {
       return false;
     }
 
-    if (selectedStatus.value !== 'all' && summary.status !== selectedStatus.value) {
-      return false;
-    }
-
-    return true;
-  });
-});
+    return selectedStatus.value === 'all' || summary.status === selectedStatus.value;
+  }),
+);
 
 const selectedSummary = computed(() => {
-  if (!selectedSummaryId.value) {
-    return null;
-  }
-
-  const isStillVisible = filteredSummaries.value.some(
+  const isVisible = filteredSummaries.value.some(
     (summary) => summary.id === selectedSummaryId.value,
   );
 
-  if (!isStillVisible) {
-    return null;
-  }
-
-  return (
-    fullCustomerSummaries.value.find((summary) => summary.id === selectedSummaryId.value) || null
-  );
+  if (!selectedSummaryId.value || !isVisible) return null;
+  return siteSummaries.value.find((summary) => summary.id === selectedSummaryId.value) || null;
 });
 
-watch(selectedCustomerId, () => {
+onMounted(async () => {
+  try {
+    [employees.value, sites.value] = await Promise.all([
+      trainingRepository.listEmployees(),
+      trainingRepository.listSites(),
+    ]);
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+});
+
+watch(selectedSiteId, async (siteId) => {
   selectedCourseId.value = 'all';
   selectedSummaryId.value = null;
+  siteCourses.value = [];
+  siteSummaries.value = [];
+  errorMessage.value = '';
+
+  if (siteId === 'all') return;
+
+  loading.value = true;
+
+  try {
+    [siteCourses.value, siteSummaries.value] = await Promise.all([
+      trainingRepository.listSiteCourses(siteId),
+      trainingRepository.getSiteReadiness(siteId),
+    ]);
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    loading.value = false;
+  }
 });
 
 watch([selectedEmployeeId, selectedCourseId, selectedStatus], () => {
@@ -100,67 +104,42 @@ watch([selectedEmployeeId, selectedCourseId, selectedStatus], () => {
 });
 
 function resetFilters() {
-  selectedCustomerId.value = 'all';
+  selectedSiteId.value = 'all';
   selectedEmployeeId.value = 'all';
   selectedCourseId.value = 'all';
   selectedStatus.value = 'all';
   selectedSummaryId.value = null;
 }
 
-function selectSummary(summary) {
-  selectedSummaryId.value = summary.id;
-}
-
 function nextAction(summary) {
-  if (summary.status === 'noRequirements') {
-    return 'No requirements assigned';
-  }
+  if (summary.status === 'noRequirements') return 'No requirements assigned';
 
-  const priority = {
-    overdue: 0,
-    incomplete: 1,
-    expiring: 2,
-    compliant: 3,
-  };
-
+  const priority = { overdue: 0, incomplete: 1, expiring: 2, compliant: 3 };
   const row = [...summary.courses].sort((a, b) => priority[a.status] - priority[b.status])[0];
 
   if (!row || row.status === 'compliant') return 'Ready for site access';
   if (row.status === 'overdue') return `${row.course.name} expired`;
   if (row.status === 'incomplete') return `${row.course.name} missing`;
-
   return `${row.course.name} expires soon`;
 }
 
 function expiryText(row) {
   if (!row.completion) return 'Not completed';
   if (row.daysUntilExpiry < 0) return `Expired ${formatDate(row.completion.expiresOn)}`;
-
   return formatDate(row.completion.expiresOn);
 }
 </script>
 
 <template>
   <section class="page-stack">
-    <div class="page-header">
-      <div>
-        <p class="eyebrow">NME staff workspace</p>
-        <h1>Training compliance</h1>
-        <p class="page-intro">
-          Track required courses by employee, customer site, and expiry status. Demo data is current
-          as of {{ formatDate(referenceDate) }}.
-        </p>
-      </div>
-    </div>
-
     <section class="panel filter-panel" aria-label="Training filters">
       <div class="filter-grid">
         <label class="field">
           <span>Customer / Site</span>
-          <select v-model="selectedCustomerId">
-            <option value="all">All customers</option>
-            <option v-for="customer in customers" :key="customer.id" :value="customer.id">
-              {{ customer.name }} - {{ customer.site }}
+          <select v-model="selectedSiteId">
+            <option value="all">Select a customer site</option>
+            <option v-for="site in sites" :key="site.id" :value="site.id">
+              {{ site.customer.name }} - {{ site.name }}
             </option>
           </select>
         </label>
@@ -177,11 +156,11 @@ function expiryText(row) {
 
         <label class="field">
           <span>Course</span>
-          <select v-model="selectedCourseId" :disabled="!hasSelectedCustomer">
+          <select v-model="selectedCourseId" :disabled="!hasSelectedSite">
             <option value="all">
-              {{ hasSelectedCustomer ? 'All site courses' : 'Select customer first' }}
+              {{ hasSelectedSite ? 'All site courses' : 'Select customer first' }}
             </option>
-            <option v-for="course in availableCourses" :key="course.id" :value="course.id">
+            <option v-for="course in siteCourses" :key="course.id" :value="course.id">
               {{ course.name }}
             </option>
           </select>
@@ -203,18 +182,17 @@ function expiryText(row) {
       </div>
     </section>
 
-    <div v-if="hasSelectedCustomer" class="workspace-grid">
+    <div v-if="errorMessage" class="error-banner" role="alert">{{ errorMessage }}</div>
+    <div v-if="loading" class="panel loading-state">Loading site readiness...</div>
+
+    <div v-else-if="hasSelectedSite" class="workspace-grid">
       <section class="panel panel--large">
         <div class="panel-header">
           <div>
             <h2>Employee site readiness</h2>
             <p>
               {{ filteredSummaries.length }}
-              {{
-                selectedCourseId === 'all'
-                  ? 'employee-site assignments'
-                  : 'employee course records'
-              }}
+              {{ selectedCourseId === 'all' ? 'employee-site assignments' : 'employee course records' }}
               match your filters.
             </p>
           </div>
@@ -237,8 +215,8 @@ function expiryText(row) {
                 :key="summary.id"
                 :class="{ 'is-selected': selectedSummary?.id === summary.id }"
                 tabindex="0"
-                @click="selectSummary(summary)"
-                @keydown.enter="selectSummary(summary)"
+                @click="selectedSummaryId = summary.id"
+                @keydown.enter="selectedSummaryId = summary.id"
               >
                 <td>
                   <strong>{{ summary.employee.name }}</strong>
@@ -246,13 +224,11 @@ function expiryText(row) {
                 </td>
                 <td>
                   <strong>{{ summary.customer.name }}</strong>
-                  <span>{{ summary.customer.site }}</span>
+                  <span>{{ summary.site.name }}</span>
                 </td>
                 <td>
                   <strong>{{ summary.completedCount }} / {{ summary.requiredCount }}</strong>
-                  <span>
-                    {{ summary.requiredCount ? 'courses current' : 'no site requirements' }}
-                  </span>
+                  <span>{{ summary.requiredCount ? 'courses current' : 'no site requirements' }}</span>
                 </td>
                 <td><StatusBadge :status="summary.status" /></td>
                 <td>{{ nextAction(summary) }}</td>
@@ -272,7 +248,7 @@ function expiryText(row) {
           <div>
             <h2>Employee detail</h2>
             <p v-if="selectedSummary">
-              {{ selectedSummary.employee.name }} at {{ selectedSummary.customer.site }}
+              {{ selectedSummary.employee.name }} at {{ selectedSummary.site.name }}
             </p>
             <p v-else>Select a row to inspect required courses.</p>
           </div>
@@ -286,7 +262,7 @@ function expiryText(row) {
             </div>
             <div>
               <strong>{{ selectedSummary.customer.name }}</strong>
-              <span>{{ selectedSummary.customer.region }}</span>
+              <span>{{ selectedSummary.site.region }}</span>
             </div>
           </div>
 
@@ -301,36 +277,26 @@ function expiryText(row) {
           >
             <div>
               <strong>
-                {{
-                  selectedSummary.eligible
-                    ? 'Eligible for site access'
-                    : 'Not eligible for site access'
-                }}
+                {{ selectedSummary.eligible ? 'Eligible for site access' : 'Not eligible for site access' }}
               </strong>
               <span v-if="selectedSummary.status === 'expiring'">
-                Eligible now. {{ selectedSummary.expiringCount }}
-                required
-                {{ selectedSummary.expiringCount === 1 ? 'course expires' : 'courses expire' }}
-                soon.
+                Eligible now. {{ selectedSummary.expiringCount }} required
+                {{ selectedSummary.expiringCount === 1 ? 'course expires' : 'courses expire' }} soon.
               </span>
-              <span v-else-if="selectedSummary.eligible">
-                All required site courses are current.
-              </span>
-              <span v-else>
-                Missing or expired training must be resolved before site access.
-              </span>
+              <span v-else-if="selectedSummary.eligible">All required site courses are current.</span>
+              <span v-else>Missing or expired training must be resolved before site access.</span>
             </div>
             <StatusBadge :status="selectedSummary.status" />
           </div>
 
           <div v-if="!selectedSummary.courses.length" class="empty-state">
             <strong>No site requirements</strong>
-            <p>This customer/site does not currently have required courses configured.</p>
+            <p>This customer site does not currently have required courses configured.</p>
           </div>
 
           <article
             v-for="row in selectedSummary.courses"
-            :key="`${row.employeeId}-${row.customerId}-${row.courseId}`"
+            :key="`${row.employeeId}-${row.siteId}-${row.courseId}`"
             class="requirement-row"
           >
             <div>

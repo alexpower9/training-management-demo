@@ -1,0 +1,24 @@
+[Unit]
+Description=NME Training API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nme-training
+Group=nme-training
+WorkingDirectory=/opt/nme-training/server
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+EnvironmentFile=/etc/nme-training/api.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

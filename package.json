@@ -3,15 +3,26 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "server"
+  ],
   "scripts": {
     "dev": "vite",
+    "dev:api": "npm run dev --workspace server",
     "build": "vite build",
-    "preview": "vite preview"
+    "build:api": "npm run build --workspace server",
+    "build:all": "npm run build && npm run build:api",
+    "test:api": "npm run test --workspace server",
+    "preview": "vite preview",
+    "prisma:generate": "npm run prisma:generate --workspace server",
+    "prisma:migrate": "npm run prisma:migrate --workspace server",
+    "prisma:seed": "npm run prisma:seed --workspace server"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.8",
     "@tailwindcss/vite": "^4.1.8",
     "flowbite": "^3.1.2",
+    "oidc-client-ts": "^3.5.0",
     "vue": "^3.5.13",
     "vue-router": "^4.5.1"
   },

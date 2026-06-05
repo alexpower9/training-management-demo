@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Employee {
+  id          String       @id @default(uuid())
+  name        String
+  position    String
+  crew        String
+  homeBase    String
+  active      Boolean      @default(true)
+  archivedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  completions Completion[]
+
+  @@index([active, name])
+}
+
+model Customer {
+  id         String   @id @default(uuid())
+  name       String   @unique
+  contact    String?
+  active     Boolean  @default(true)
+  archivedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  sites      Site[]
+
+  @@index([active, name])
+}
+
+model Site {
+  id         String   @id @default(uuid())
+  customerId String
+  name       String
+  region     String
+  active     Boolean  @default(true)
+  archivedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  courses    Course[]
+
+  @@unique([customerId, name])
+  @@index([active, name])
+}
+
+model Course {
+  id            String       @id @default(uuid())
+  siteId        String
+  code          String
+  name          String
+  category      String
+  renewalMonths Int
+  active        Boolean      @default(true)
+  archivedAt    DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  site          Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  completions   Completion[]
+
+  @@unique([siteId, code])
+  @@index([siteId, active])
+}
+
+model Completion {
+  id                String    @id @default(uuid())
+  employeeId        String
+  courseId          String
+  completedOn       DateTime  @db.Date
+  expiresOn         DateTime  @db.Date
+  recordedBySubject String
+  createdAt         DateTime  @default(now())
+  voidedAt          DateTime?
+  voidedBySubject   String?
+  voidReason        String?
+  employee          Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  course            Course    @relation(fields: [courseId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, courseId, completedOn])
+  @@index([courseId, voidedAt])
+}
+
+model AuditEvent {
+  id           String   @id @default(uuid())
+  actorSubject String
+  action       String
+  entityType   String
+  entityId     String
+  details      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorSubject, createdAt])
+}
