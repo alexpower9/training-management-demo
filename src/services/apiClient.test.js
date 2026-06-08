@@ -20,8 +20,8 @@ describe('apiRequest', () => {
       ok: false,
       status: 409,
       json: async () => ({
-        code: 'EDIT_CONFLICT',
-        message: 'This record changed.',
+        code: 'CONFLICT',
+        message: 'A record already exists.',
         fieldErrors: { name: ['Use another name.'] },
         requestId: 'request-123',
       }),
@@ -29,7 +29,7 @@ describe('apiRequest', () => {
 
     await expect(apiRequest('/admin/employees/1')).rejects.toMatchObject({
       name: 'ApiError',
-      code: 'EDIT_CONFLICT',
+      code: 'CONFLICT',
       status: 409,
       fieldErrors: { name: ['Use another name.'] },
       requestId: 'request-123',
@@ -39,7 +39,7 @@ describe('apiRequest', () => {
   it('returns actionable API setup messaging on network failure', async () => {
     fetch.mockRejectedValue(new TypeError('network unavailable'));
 
-    await expect(apiRequest('/admin/overview')).rejects.toEqual(
+    await expect(apiRequest('/admin/employees')).rejects.toEqual(
       expect.objectContaining({
         constructor: ApiError,
         code: 'API_UNAVAILABLE',

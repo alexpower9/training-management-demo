@@ -157,8 +157,6 @@ Create an Amazon RDS for PostgreSQL instance with:
   instance class; and
 - Multi-AZ if the business requires availability beyond a single-AZ v1.
 
-`btree_gist` is supported by RDS and is created by the initial migration.
-
 Use separate credentials:
 
 - a migration owner that can create extensions, tables, indexes, and
@@ -169,12 +167,13 @@ The application user should have:
 
 - `CONNECT` on the database;
 - `USAGE` on the application schema;
-- `SELECT`, `INSERT`, and `UPDATE` on business tables;
-- `SELECT` and `INSERT` on `audit_event`; and
+- `SELECT`, `INSERT`, and `UPDATE` on the five business tables; and
+- `DELETE` on `site_course_requirement` so course edits can replace assignments;
+- no `DELETE` permission on the other business tables; and
 - no schema-change permission.
 
-The API does not need normal production delete permission. Database migrations
-must run as the migration owner, not as the application user.
+Database migrations must run as the migration owner, not as the application
+user.
 
 ## 7. Store Database Credentials
 
@@ -414,12 +413,12 @@ Validate:
 1. Viewer login succeeds and `/manage` is rejected.
 2. Administrator login succeeds.
 3. Employee create, edit, archive, and restore work.
-4. Customer and site archive safeguards work.
-5. Requirements can be added, ended, and historically queried.
-6. Manual and calculated completion expiry work.
+4. Site archive and restore preserve course assignments.
+5. Course create and edit atomically replace site assignments.
+6. Completion expiry is calculated from course validity.
 7. January 31 expiry clamps correctly in February.
 8. Renewal and void workflows work.
-9. Every mutation creates an audit event.
+9. Course archive and restore preserve and suspend site assignments.
 10. Expired access tokens return `401`.
 11. Viewer mutations return `403`.
 12. The browser never receives database credentials.

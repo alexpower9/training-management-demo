@@ -28,12 +28,8 @@ describe('ManageEmployees route state', () => {
     const employee = {
       id: 'employee-1',
       displayName: 'Alex Power',
-      jobTitle: 'Technician',
-      crew: 'Field',
-      homeBase: 'Labrador City',
       archivedAt: null,
       latestCompletionOn: null,
-      version: 1,
     };
     mocks.listEmployees.mockResolvedValue({ items: [employee], total: 1 });
     mocks.getEmployee.mockResolvedValue({ ...employee, completions: [] });

@@ -15,6 +15,7 @@ import { adminRepository } from '@/services/adminRepository';
 const route = useRoute();
 const router = useRouter();
 const items = ref([]);
+const siteOptions = ref([]);
 const total = ref(0);
 const page = ref(Number(route.query.page) || 1);
 const pageSize = 25;
@@ -31,30 +32,54 @@ const fieldErrors = ref({});
 const confirmOpen = ref(false);
 const confirmBusy = ref(false);
 const form = reactive({
-  code: '',
   name: '',
-  category: '',
-  defaultValidityMonths: '',
+  validityMonths: '',
+  siteIds: [],
 });
 const initialForm = ref('');
 
+const activeSites = computed(() =>
+  siteOptions.value.filter((site) => !site.archivedAt),
+);
+const visibleSiteOptions = computed(() =>
+  siteOptions.value.filter(
+    (site) => !site.archivedAt || form.siteIds.includes(site.id),
+  ),
+);
+const allActiveSitesSelected = computed(
+  () =>
+    activeSites.value.length > 0 &&
+    activeSites.value.every((site) => form.siteIds.includes(site.id)),
+);
 const formDirty = computed(() => JSON.stringify(form) !== initialForm.value);
 const drawerTitle = computed(() =>
   formMode.value === 'create' ? 'Add course' : 'Edit course',
 );
-const openRequirements = computed(
-  () => selected.value?.requirements.filter((requirement) => !requirement.effectiveTo) || [],
-);
 
 function setForm(values = {}) {
   Object.assign(form, {
-    code: values.code || '',
     name: values.name || '',
-    category: values.category || '',
-    defaultValidityMonths: values.defaultValidityMonths ?? '',
+    validityMonths: values.validityMonths ?? '',
+    siteIds:
+      values.requirements?.map((requirement) => requirement.siteId) ||
+      values.siteIds ||
+      [],
   });
   initialForm.value = JSON.stringify(form);
   fieldErrors.value = {};
+}
+
+function toggleAllSites() {
+  const activeSiteIds = activeSites.value.map((site) => site.id);
+  if (allActiveSitesSelected.value) {
+    form.siteIds = form.siteIds.filter((siteId) => !activeSiteIds.includes(siteId));
+    return;
+  }
+  form.siteIds = [...new Set([...form.siteIds, ...activeSiteIds])];
+}
+
+function assignedSiteNames(course) {
+  return course.requirements.map((requirement) => requirement.site.name).join(', ');
 }
 
 function syncQuery() {
@@ -66,6 +91,14 @@ function syncQuery() {
       ...(selected.value?.id ? { id: selected.value.id } : {}),
     },
   });
+}
+
+async function loadSiteOptions() {
+  try {
+    siteOptions.value = await adminRepository.listSiteOptions();
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
 }
 
 async function loadList() {
@@ -121,27 +154,21 @@ async function saveCourse() {
   fieldErrors.value = {};
   try {
     const payload = {
-      code: form.code,
       name: form.name,
-      category: form.category || null,
-      defaultValidityMonths:
-        form.defaultValidityMonths === '' ? null : Number(form.defaultValidityMonths),
+      validityMonths: Number(form.validityMonths),
+      siteIds: form.siteIds,
     };
     const saved =
       formMode.value === 'create'
         ? await adminRepository.createCourse(payload)
-        : await adminRepository.updateCourse(selected.value.id, {
-            ...payload,
-            expectedVersion: selected.value.version,
-          });
+        : await adminRepository.updateCourse(selected.value.id, payload);
     drawerOpen.value = false;
     addToast(formMode.value === 'create' ? 'Course added.' : 'Course updated.');
     await loadList();
     await selectCourse(saved.id);
   } catch (error) {
     fieldErrors.value = error.fieldErrors || {};
-    if (error.code === 'EDIT_CONFLICT') errorMessage.value = error.message;
-    else if (!Object.keys(fieldErrors.value).length) addToast(error.message, 'danger');
+    if (!Object.keys(fieldErrors.value).length) addToast(error.message, 'danger');
   } finally {
     saving.value = false;
   }
@@ -155,7 +182,6 @@ async function toggleArchive() {
     const updated = await adminRepository.setCourseArchived(
       selected.value.id,
       archived,
-      selected.value.version,
     );
     confirmOpen.value = false;
     addToast(archived ? 'Course archived.' : 'Course restored.');
@@ -181,7 +207,7 @@ function changePage(nextPage) {
 }
 
 onMounted(async () => {
-  await loadList();
+  await Promise.all([loadSiteOptions(), loadList()]);
   if (route.query.action === 'create') openCreate();
 });
 
@@ -193,7 +219,7 @@ watch(includeArchived, applySearch);
     <div class="section-heading">
       <div>
         <h2>Course catalogue</h2>
-        <p>Maintain reusable training definitions and their default validity periods.</p>
+        <p>Create courses, choose their required sites, and set automatic expiry.</p>
       </div>
       <button class="primary-action" type="button" @click="openCreate">Add course</button>
     </div>
@@ -201,7 +227,7 @@ watch(includeArchived, applySearch);
     <SearchToolbar
       v-model="search"
       v-model:include-archived="includeArchived"
-      placeholder="Search code, course name, or category"
+      placeholder="Search course name"
       @search="applySearch"
     />
 
@@ -216,7 +242,7 @@ watch(includeArchived, applySearch);
               <tr>
                 <th>Course</th>
                 <th>Validity</th>
-                <th>Open site requirements</th>
+                <th>Assigned sites</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -229,14 +255,15 @@ watch(includeArchived, applySearch);
                 @click="selectCourse(course.id)"
                 @keydown.enter="selectCourse(course.id)"
               >
+                <td><strong>{{ course.name }}</strong></td>
+                <td>{{ course.validityMonths }} months</td>
                 <td>
-                  <strong>{{ course.code }} · {{ course.name }}</strong>
-                  <span>{{ course.category || 'Uncategorized' }}</span>
+                  <strong>{{ assignedSiteNames(course) }}</strong>
+                  <span>
+                    {{ course.requirements.length }}
+                    {{ course.requirements.length === 1 ? 'site' : 'sites' }}
+                  </span>
                 </td>
-                <td>
-                  {{ course.defaultValidityMonths ? `${course.defaultValidityMonths} months` : 'Manual only' }}
-                </td>
-                <td>{{ course.requirements.length }}</td>
                 <td><ArchiveBadge :archived="Boolean(course.archivedAt)" /></td>
               </tr>
             </tbody>
@@ -251,8 +278,8 @@ watch(includeArchived, applySearch);
       </section>
 
       <DetailPanel
-        :title="selected ? `${selected.code} · ${selected.name}` : 'Course detail'"
-        :subtitle="selected ? selected.category || 'Uncategorized' : 'Select a course to inspect its usage.'"
+        :title="selected?.name || 'Course detail'"
+        :subtitle="selected ? `${selected.requirements.length} assigned site(s)` : 'Select a course to inspect its usage.'"
       >
         <template v-if="selected" #actions>
           <div class="inline-actions">
@@ -267,10 +294,8 @@ watch(includeArchived, applySearch);
         <div v-else-if="selected" class="detail-stack">
           <div class="profile-strip">
             <div>
-              <strong>
-                {{ selected.defaultValidityMonths ? `${selected.defaultValidityMonths} months` : 'Manual' }}
-              </strong>
-              <span>Default expiry</span>
+              <strong>{{ selected.validityMonths }} months</strong>
+              <span>Automatic expiry</span>
             </div>
             <div>
               <strong>{{ selected.completions.length }}</strong>
@@ -279,26 +304,18 @@ watch(includeArchived, applySearch);
           </div>
 
           <div>
-            <h3 class="detail-heading">Site requirements</h3>
-            <div v-if="selected.requirements.length" class="stack-list">
+            <h3 class="detail-heading">Required sites</h3>
+            <div class="stack-list">
               <article
                 v-for="requirement in selected.requirements"
-                :key="requirement.id"
+                :key="`${requirement.siteId}:${requirement.courseId}`"
                 class="requirement-row"
               >
                 <div>
-                  <strong>{{ requirement.site.customer.name }} · {{ requirement.site.name }}</strong>
-                  <span>
-                    From {{ formatDate(requirement.effectiveFrom) }}
-                    {{ requirement.effectiveTo ? `to ${formatDate(requirement.effectiveTo)}` : '· Open' }}
-                  </span>
+                  <strong>{{ requirement.site.name }}</strong>
+                  <span>{{ requirement.site.archivedAt ? 'Archived site' : 'Active site' }}</span>
                 </div>
-                <span>{{ requirement.warningDays }} day warning</span>
               </article>
-            </div>
-            <div v-else class="empty-state">
-              <strong>Not required by a site</strong>
-              <p>Add this course from a site's requirement workspace.</p>
             </div>
           </div>
 
@@ -336,26 +353,44 @@ watch(includeArchived, applySearch);
     @save="saveCourse"
   >
     <label class="field">
-      <span>Course code</span>
-      <input v-model="form.code" required maxlength="50" />
-      <small class="field-help">Codes are permanent identifiers and cannot be reused after archiving.</small>
-      <small v-if="fieldErrors.code" class="field-error">{{ fieldErrors.code[0] }}</small>
-    </label>
-    <label class="field">
       <span>Course name</span>
       <input v-model="form.name" required maxlength="180" />
       <small v-if="fieldErrors.name" class="field-error">{{ fieldErrors.name[0] }}</small>
     </label>
+    <fieldset class="choice-group site-choice-group">
+      <legend>Required sites</legend>
+      <label v-if="activeSites.length" class="site-select-all">
+        <input
+          type="checkbox"
+          :checked="allActiveSitesSelected"
+          @change="toggleAllSites"
+        />
+        Select all active sites
+      </label>
+      <label v-for="site in visibleSiteOptions" :key="site.id">
+        <input
+          v-model="form.siteIds"
+          type="checkbox"
+          :value="site.id"
+          :disabled="Boolean(site.archivedAt) && !form.siteIds.includes(site.id)"
+        />
+        {{ site.name }}{{ site.archivedAt ? ' (archived)' : '' }}
+      </label>
+      <small v-if="!siteOptions.length" class="field-help">
+        Add a site before creating a course.
+      </small>
+      <small v-if="fieldErrors.siteIds" class="field-error">
+        {{ fieldErrors.siteIds[0] }}
+      </small>
+    </fieldset>
     <label class="field">
-      <span>Category</span>
-      <input v-model="form.category" maxlength="100" />
-    </label>
-    <label class="field">
-      <span>Default validity in months</span>
-      <input v-model="form.defaultValidityMonths" type="number" min="1" max="120" />
-      <small class="field-help">Leave blank when expiry must always be entered from the certificate.</small>
-      <small v-if="fieldErrors.defaultValidityMonths" class="field-error">
-        {{ fieldErrors.defaultValidityMonths[0] }}
+      <span>Validity in months</span>
+      <input v-model="form.validityMonths" type="number" min="1" max="120" required />
+      <small class="field-help">
+        Completion expiry is calculated automatically from this value.
+      </small>
+      <small v-if="fieldErrors.validityMonths" class="field-error">
+        {{ fieldErrors.validityMonths[0] }}
       </small>
     </label>
   </FormDrawer>
@@ -365,10 +400,8 @@ watch(includeArchived, applySearch);
     :title="selected?.archivedAt ? 'Restore course?' : 'Archive course?'"
     :message="
       selected?.archivedAt
-        ? 'The course will be available for new requirements and completions.'
-        : openRequirements.length
-          ? `This course has ${openRequirements.length} open site requirement(s). End them before archiving.`
-          : 'The course will no longer be available for new requirements or completions. History is preserved.'
+        ? 'The course and its saved site assignments will return to readiness and completion entry.'
+        : 'The course will stop affecting readiness and new completions. Its site assignments and history are preserved.'
     "
     :confirm-label="selected?.archivedAt ? 'Restore' : 'Archive'"
     :danger="!selected?.archivedAt"

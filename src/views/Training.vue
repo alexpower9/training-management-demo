@@ -20,8 +20,13 @@ const selectedStatus = ref('all');
 const selectedSummaryId = ref(null);
 const loading = ref(false);
 const errorMessage = ref('');
+let readinessRequestId = 0;
 
 const hasSelectedSite = computed(() => selectedSiteId.value !== 'all');
+const hasSelectedEmployee = computed(() => selectedEmployeeId.value !== 'all');
+const hasSelectedScope = computed(
+  () => hasSelectedSite.value || hasSelectedEmployee.value,
+);
 const statusOptions = computed(() =>
   Object.entries(statusMeta).map(([value, meta]) => ({
     value,
@@ -38,7 +43,6 @@ const courseScopedSummaries = computed(() => {
     .map((summary) =>
       summarizeEmployeeReadiness(
         summary.employee,
-        summary.customer,
         summary.site,
         summary.courses.filter((row) => row.courseId === selectedCourseId.value),
       ),
@@ -76,30 +80,102 @@ onMounted(async () => {
   }
 });
 
-watch(selectedSiteId, async (siteId) => {
+function prepareReadinessLoad() {
+  const requestId = ++readinessRequestId;
   selectedCourseId.value = 'all';
   selectedSummaryId.value = null;
   siteCourses.value = [];
   siteSummaries.value = [];
   errorMessage.value = '';
-
-  if (siteId === 'all') return;
-
   loading.value = true;
+  return requestId;
+}
+
+function finishReadinessLoad(requestId) {
+  if (requestId === readinessRequestId) {
+    loading.value = false;
+  }
+}
+
+function clearReadiness() {
+  readinessRequestId += 1;
+  selectedCourseId.value = 'all';
+  selectedSummaryId.value = null;
+  siteCourses.value = [];
+  siteSummaries.value = [];
+  errorMessage.value = '';
+  loading.value = false;
+}
+
+async function loadSiteReadiness(siteId) {
+  const requestId = prepareReadinessLoad();
 
   try {
-    [siteCourses.value, siteSummaries.value] = await Promise.all([
+    const [courses, summaries] = await Promise.all([
       trainingRepository.listSiteCourses(siteId),
       trainingRepository.getSiteReadiness(siteId),
     ]);
+
+    if (requestId !== readinessRequestId) return;
+    siteCourses.value = courses;
+    siteSummaries.value = summaries;
   } catch (error) {
+    if (requestId !== readinessRequestId) return;
     errorMessage.value = error.message;
   } finally {
-    loading.value = false;
+    finishReadinessLoad(requestId);
   }
+}
+
+async function loadEmployeeReadiness(employeeId) {
+  const requestId = prepareReadinessLoad();
+
+  try {
+    const summariesBySite = await Promise.all(
+      sites.value.map((site) => trainingRepository.getSiteReadiness(site.id)),
+    );
+
+    if (requestId !== readinessRequestId) return;
+    siteSummaries.value = summariesBySite
+      .flat()
+      .filter((summary) => summary.employee.id === employeeId)
+      .sort(sortReadiness);
+  } catch (error) {
+    if (requestId !== readinessRequestId) return;
+    errorMessage.value = error.message;
+  } finally {
+    finishReadinessLoad(requestId);
+  }
+}
+
+watch(selectedSiteId, (siteId) => {
+  if (siteId !== 'all') {
+    loadSiteReadiness(siteId);
+    return;
+  }
+
+  if (hasSelectedEmployee.value) {
+    loadEmployeeReadiness(selectedEmployeeId.value);
+    return;
+  }
+
+  clearReadiness();
 });
 
-watch([selectedEmployeeId, selectedCourseId, selectedStatus], () => {
+watch(selectedEmployeeId, (employeeId) => {
+  selectedSummaryId.value = null;
+
+  if (hasSelectedSite.value) return;
+
+  if (employeeId !== 'all') {
+    loadEmployeeReadiness(employeeId);
+    return;
+  }
+
+  clearReadiness();
+});
+
+watch([selectedCourseId, selectedStatus], () => {
   selectedSummaryId.value = null;
 });
 
@@ -135,11 +211,11 @@ function expiryText(row) {
     <section class="panel filter-panel" aria-label="Training filters">
       <div class="filter-grid">
         <label class="field">
-          <span>Customer / Site</span>
-          <select v-model="selectedSiteId">
-            <option value="all">Select a customer site</option>
+          <span>Site</span>
+          <select v-model="selectedSiteId" aria-label="Site">
+            <option value="all">Select a site</option>
             <option v-for="site in sites" :key="site.id" :value="site.id">
-              {{ site.customer.name }} - {{ site.name }}
+              {{ site.name }}
             </option>
           </select>
         </label>
@@ -156,9 +232,13 @@ function expiryText(row) {
 
         <label class="field">
           <span>Course</span>
-          <select v-model="selectedCourseId" :disabled="!hasSelectedSite">
+          <select
+            v-model="selectedCourseId"
+            aria-label="Course"
+            :disabled="!hasSelectedSite"
+          >
             <option value="all">
-              {{ hasSelectedSite ? 'All site courses' : 'Select customer first' }}
+              {{ hasSelectedSite ? 'All site courses' : 'Select site first' }}
             </option>
             <option v-for="course in siteCourses" :key="course.id" :value="course.id">
               {{ course.name }}
@@ -183,9 +263,9 @@ function expiryText(row) {
     </section>
 
     <div v-if="errorMessage" class="error-banner" role="alert">{{ errorMessage }}</div>
-    <div v-if="loading" class="panel loading-state">Loading site readiness...</div>
+    <div v-if="loading" class="panel loading-state">Loading training readiness...</div>
 
-    <div v-else-if="hasSelectedSite" class="workspace-grid">
+    <div v-else-if="hasSelectedScope" class="workspace-grid">
       <section class="panel panel--large">
         <div class="panel-header">
           <div>
@@ -203,7 +283,7 @@ function expiryText(row) {
             <thead>
               <tr>
                 <th>Employee</th>
-                <th>Customer / Site</th>
+                <th>Site</th>
                 <th>Required</th>
                 <th>{{ selectedCourseId === 'all' ? 'Site status' : 'Course status' }}</th>
                 <th>Next action</th>
@@ -220,11 +300,10 @@ function expiryText(row) {
               >
                 <td>
                   <strong>{{ summary.employee.name }}</strong>
-                  <span>{{ summary.employee.position }}</span>
                 </td>
                 <td>
-                  <strong>{{ summary.customer.name }}</strong>
-                  <span>{{ summary.site.name }}</span>
+                  <strong>{{ summary.site.name }}</strong>
+                  <span>{{ summary.site.timeZone }}</span>
                 </td>
                 <td>
                   <strong>{{ summary.completedCount }} / {{ summary.requiredCount }}</strong>
@@ -258,11 +337,11 @@ function expiryText(row) {
           <div class="profile-strip">
             <div>
               <strong>{{ selectedSummary.employee.name }}</strong>
-              <span>{{ selectedSummary.employee.position }}</span>
+              <span>Employee</span>
             </div>
             <div>
-              <strong>{{ selectedSummary.customer.name }}</strong>
-              <span>{{ selectedSummary.site.region }}</span>
+              <strong>{{ selectedSummary.site.name }}</strong>
+              <span>{{ selectedSummary.site.timeZone }}</span>
             </div>
           </div>
 
@@ -288,7 +367,7 @@ function expiryText(row) {
 
           <div v-if="!selectedSummary.courses.length" class="empty-state">
             <strong>No site requirements</strong>
-            <p>This customer site does not currently have required courses configured.</p>
+            <p>This site does not currently have required courses configured.</p>
           </div>
 
           <article
@@ -298,7 +377,7 @@ function expiryText(row) {
           >
             <div>
               <strong>{{ row.course.name }}</strong>
-              <span>{{ row.course.code }} · {{ row.course.category }}</span>
+              <span>{{ row.course.validityMonths }} month validity</span>
             </div>
             <div class="requirement-status">
               <StatusBadge :status="row.status" />

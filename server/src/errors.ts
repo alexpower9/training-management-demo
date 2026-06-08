@@ -50,13 +50,6 @@ export function registerErrorHandler(app: FastifyInstance) {
         });
       }
 
-      if (error.code === 'P2004') {
-        return reply.status(409).send({
-          code: 'REQUIREMENT_OVERLAP',
-          message: 'This course already has an overlapping requirement for the site.',
-          requestId: request.id,
-        });
-      }
     }
 
     request.log.error(error);

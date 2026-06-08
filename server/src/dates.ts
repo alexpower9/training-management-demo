@@ -33,6 +33,15 @@ export function addCalendarMonths(dateString: string, months: number) {
   );
 }
 
+export function isValidTimeZone(timeZone: string) {
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function todayInTimeZone(timeZone: string, now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,

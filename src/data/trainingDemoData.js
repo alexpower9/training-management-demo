@@ -8,12 +8,6 @@ export const employees = demoData.employees.map((employee) => ({
   archivedAt: null,
 }));
 
-export const customers = demoData.customers.map((customer) => ({
-  ...customer,
-  active: true,
-  archivedAt: null,
-}));
-
 export const sites = demoData.sites.map((site) => ({
   ...site,
   active: true,
@@ -21,13 +15,8 @@ export const sites = demoData.sites.map((site) => ({
 }));
 
 export const courses = demoData.courses.map((course) => ({
-  id: course.id,
-  siteId: course.siteId,
-  code: course.code,
-  name: course.name,
-  category: course.category,
-  renewalMonths: course.defaultValidityMonths,
-  defaultValidityMonths: course.defaultValidityMonths,
+  ...course,
+  renewalMonths: course.validityMonths,
   active: true,
   archivedAt: null,
 }));
@@ -37,9 +26,7 @@ export const completions = employees.flatMap((employee) =>
     const key = `${employee.id}:${course.id}`;
     const exception = demoData.completionExceptions[key];
 
-    if (exception === null) {
-      return [];
-    }
+    if (exception === null) return [];
 
     return [
       {
@@ -48,7 +35,6 @@ export const completions = employees.flatMap((employee) =>
         courseId: course.id,
         completedOn: exception?.completedOn || demoData.defaultCompletion.completedOn,
         expiresOn: exception?.expiresOn || demoData.defaultCompletion.expiresOn,
-        expirySource: 'MANUAL',
         validityMonthsApplied: null,
         recordedBySubject: 'demo-seed',
         recordedAt: '2026-06-05T12:00:00.000Z',
@@ -83,14 +69,12 @@ function toDate(dateString) {
 export function daysUntil(dateString, fromDate = referenceDate) {
   const target = toDate(dateString);
   const today = toDate(fromDate);
-
   if (!target || !today) return null;
   return Math.ceil((target.getTime() - today.getTime()) / 86400000);
 }
 
 export function formatDate(dateString) {
   if (!dateString) return 'Not completed';
-
   return new Intl.DateTimeFormat('en-CA', {
     month: 'short',
     day: 'numeric',
@@ -123,15 +107,20 @@ function latestCompletion(employeeId, courseId) {
 
 export function getDemoSiteCourses(siteId, asOf = referenceDate) {
   if (!asOf) return [];
-  return courses.filter((course) => course.siteId === siteId && course.active);
+  const courseIds = new Set(
+    demoData.siteCourseRequirements
+      .filter((requirement) => requirement.siteId === siteId)
+      .map((requirement) => requirement.courseId),
+  );
+  return courses
+    .filter((course) => courseIds.has(course.id) && course.active)
+    .map((course) => ({ ...course, siteId }));
 }
 
 export function getDemoSiteReadiness(siteId, asOf = referenceDate) {
   const site = sites.find((item) => item.id === siteId);
-  const customer = customers.find((item) => item.id === site?.customerId);
   const siteCourses = getDemoSiteCourses(siteId, asOf);
-
-  if (!site || !customer) return [];
+  if (!site) return [];
 
   return employees
     .filter((employee) => employee.active)
@@ -156,17 +145,16 @@ export function getDemoSiteReadiness(siteId, asOf = referenceDate) {
         };
       });
 
-      return summarizeEmployeeReadiness(employee, customer, site, courseRows);
+      return summarizeEmployeeReadiness(employee, site, courseRows);
     })
     .sort(sortReadiness);
 }
 
-export function summarizeEmployeeReadiness(employee, customer, site, courseRows) {
+export function summarizeEmployeeReadiness(employee, site, courseRows) {
   if (!courseRows.length) {
     return {
       id: `${employee.id}-${site.id}`,
       employee,
-      customer,
       site,
       courses: [],
       requiredCount: 0,
@@ -178,16 +166,15 @@ export function summarizeEmployeeReadiness(employee, customer, site, courseRows)
   }
 
   const statuses = courseRows.map((row) => row.status);
-
   return {
     id: `${employee.id}-${site.id}`,
     employee,
-    customer,
     site,
     courses: courseRows,
     requiredCount: courseRows.length,
-    completedCount: courseRows.filter((row) => ['compliant', 'expiring'].includes(row.status))
-      .length,
+    completedCount: courseRows.filter((row) =>
+      ['compliant', 'expiring'].includes(row.status),
+    ).length,
     expiringCount: courseRows.filter((row) => row.status === 'expiring').length,
     status: getWorstStatus(statuses),
     eligible: statuses.every((status) => ['compliant', 'expiring'].includes(status)),
@@ -197,9 +184,7 @@ export function summarizeEmployeeReadiness(employee, customer, site, courseRows)
 export function sortReadiness(a, b) {
   const eligibilityDelta = Number(a.eligible) - Number(b.eligible);
   if (eligibilityDelta !== 0) return eligibilityDelta;
-
   const statusDelta = statusRank[b.status] - statusRank[a.status];
   if (statusDelta !== 0) return statusDelta;
-
   return a.employee.name.localeCompare(b.employee.name);
 }

@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { AppError } from './errors.js';
 import { daysBetween, formatDateOnly, parseDateOnly, todayInTimeZone } from './dates.js';
 
+const EXPIRING_WARNING_DAYS = 45;
 const statusRank = {
   noRequirements: -1,
   compliant: 0,
@@ -13,17 +14,11 @@ const statusRank = {
 function serializeEmployee(employee: {
   id: string;
   displayName: string;
-  jobTitle: string;
-  crew: string | null;
-  homeBase: string | null;
   archivedAt: Date | null;
 }) {
   return {
     id: employee.id,
     name: employee.displayName,
-    position: employee.jobTitle,
-    crew: employee.crew || '',
-    homeBase: employee.homeBase || '',
     active: !employee.archivedAt,
   };
 }
@@ -31,10 +26,8 @@ function serializeEmployee(employee: {
 function serializeCourse(
   course: {
     id: string;
-    code: string;
     name: string;
-    category: string | null;
-    defaultValidityMonths: number | null;
+    validityMonths: number;
     archivedAt: Date | null;
   },
   siteId: string,
@@ -42,11 +35,9 @@ function serializeCourse(
   return {
     id: course.id,
     siteId,
-    code: course.code,
     name: course.name,
-    category: course.category || '',
-    renewalMonths: course.defaultValidityMonths,
-    defaultValidityMonths: course.defaultValidityMonths,
+    renewalMonths: course.validityMonths,
+    validityMonths: course.validityMonths,
     active: !course.archivedAt,
   };
 }
@@ -57,14 +48,8 @@ export async function getSiteReadiness(
   requestedAsOf?: string,
 ) {
   const site = await prisma.site.findFirst({
-    where: {
-      id: siteId,
-      archivedAt: null,
-      customer: { archivedAt: null },
-    },
-    include: { customer: true },
+    where: { id: siteId, archivedAt: null },
   });
-
   if (!site) {
     throw new AppError(404, 'SITE_NOT_FOUND', 'The requested site was not found.');
   }
@@ -73,12 +58,7 @@ export async function getSiteReadiness(
   const asOfDate = parseDateOnly(asOf);
   const [requirements, employees] = await Promise.all([
     prisma.siteCourseRequirement.findMany({
-      where: {
-        siteId,
-        effectiveFrom: { lte: asOfDate },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOfDate } }],
-        course: { archivedAt: null },
-      },
+      where: { siteId, course: { archivedAt: null } },
       include: { course: true },
       orderBy: { course: { name: 'asc' } },
     }),
@@ -121,7 +101,7 @@ export async function getSiteReadiness(
         else if (remainingDays !== null && remainingDays < 0) status = 'overdue';
         else if (
           remainingDays !== null &&
-          remainingDays <= requirement.warningDays
+          remainingDays <= EXPIRING_WARNING_DAYS
         ) {
           status = 'expiring';
         }
@@ -130,8 +110,6 @@ export async function getSiteReadiness(
           employeeId: employee.id,
           siteId,
           courseId: requirement.courseId,
-          requirementId: requirement.id,
-          warningDays: requirement.warningDays,
           course: serializeCourse(requirement.course, siteId),
           completion: completion
             ? {
@@ -159,17 +137,9 @@ export async function getSiteReadiness(
       return {
         id: `${employee.id}-${site.id}`,
         employee: serializeEmployee(employee),
-        customer: {
-          id: site.customer.id,
-          name: site.customer.name,
-          contact: site.customer.contact,
-          active: !site.customer.archivedAt,
-        },
         site: {
           id: site.id,
-          customerId: site.customerId,
           name: site.name,
-          region: site.region || '',
           timeZone: site.timeZone,
           active: !site.archivedAt,
         },
@@ -189,12 +159,10 @@ export async function getSiteReadiness(
     .sort((a, b) => {
       const eligibilityDelta = Number(a.eligible) - Number(b.eligible);
       if (eligibilityDelta !== 0) return eligibilityDelta;
-
       const statusDelta =
         statusRank[b.status as keyof typeof statusRank] -
         statusRank[a.status as keyof typeof statusRank];
       if (statusDelta !== 0) return statusDelta;
-
       return a.employee.name.localeCompare(b.employee.name);
     });
 }

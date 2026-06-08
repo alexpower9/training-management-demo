@@ -15,6 +15,7 @@ const router = useRouter();
 const items = ref([]);
 const employees = ref([]);
 const courses = ref([]);
+const siteOptions = ref([]);
 const total = ref(0);
 const page = ref(Number(route.query.page) || 1);
 const pageSize = 25;
@@ -33,18 +34,55 @@ const form = reactive({
   employeeId: '',
   courseId: '',
   completedOn: todayDate(),
-  expirySource: 'CALCULATED',
-  expiresOn: '',
 });
 const initialForm = ref('');
 
 const selectedCourse = computed(() =>
   courses.value.find((course) => course.id === form.courseId),
 );
+const activeSites = computed(() =>
+  siteOptions.value.filter((site) => !site.archivedAt),
+);
+const activeSiteIds = computed(
+  () => new Set(activeSites.value.map((site) => site.id)),
+);
+function assignedActiveSiteIds(course) {
+  return new Set(
+    course.requirements
+      ?.map((requirement) => requirement.siteId)
+      .filter((siteId) => activeSiteIds.value.has(siteId)) || [],
+  );
+}
+const generalCourses = computed(() => {
+  return courses.value.filter(
+    (course) => assignedActiveSiteIds(course).size > 1,
+  );
+});
+const siteCourseGroups = computed(() => {
+  const generalCourseIds = new Set(generalCourses.value.map((course) => course.id));
+
+  return activeSites.value
+    .map((site) => ({
+      site,
+      courses: courses.value.filter(
+        (course) =>
+          !generalCourseIds.has(course.id) &&
+          course.requirements?.some((requirement) => requirement.siteId === site.id),
+      ),
+    }))
+    .filter((group) => group.courses.length);
+});
+const otherCourses = computed(() => {
+  const groupedCourseIds = new Set([
+    ...generalCourses.value.map((course) => course.id),
+    ...siteCourseGroups.value.flatMap((group) =>
+      group.courses.map((course) => course.id),
+    ),
+  ]);
+  return courses.value.filter((course) => !groupedCourseIds.has(course.id));
+});
 const calculatedExpiry = computed(() =>
-  form.expirySource === 'CALCULATED'
-    ? addCalendarMonths(form.completedOn, selectedCourse.value?.defaultValidityMonths)
-    : '',
+  addCalendarMonths(form.completedOn, selectedCourse.value?.validityMonths),
 );
 const formDirty = computed(() => JSON.stringify(form) !== initialForm.value);
 
@@ -61,12 +99,14 @@ function syncQuery() {
 
 async function loadOptions() {
   try {
-    const [employeeResult, courseResult] = await Promise.all([
+    const [employeeResult, courseResult, sites] = await Promise.all([
       adminRepository.listEmployees({ page: 1, pageSize: 100 }),
       adminRepository.listCourses({ page: 1, pageSize: 100 }),
+      adminRepository.listSiteOptions(),
     ]);
     employees.value = employeeResult.items;
     courses.value = courseResult.items;
+    siteOptions.value = sites;
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -106,16 +146,7 @@ function resetForm(values = {}) {
     employeeId: values.employeeId || route.query.employeeId || '',
     courseId: values.courseId || '',
     completedOn: values.completedOn || todayDate(),
-    expirySource: values.expirySource || 'CALCULATED',
-    expiresOn: values.expiresOn || '',
   });
-  if (
-    form.expirySource === 'CALCULATED' &&
-    form.courseId &&
-    !courses.value.find((course) => course.id === form.courseId)?.defaultValidityMonths
-  ) {
-    form.expirySource = 'MANUAL';
-  }
   initialForm.value = JSON.stringify(form);
   fieldErrors.value = {};
 }
@@ -126,12 +157,10 @@ function openCreate() {
 }
 
 function openRenewal(completion) {
-  const course = courses.value.find((item) => item.id === completion.courseId);
   resetForm({
     employeeId: completion.employeeId,
     courseId: completion.courseId,
     completedOn: todayDate(),
-    expirySource: course?.defaultValidityMonths ? 'CALCULATED' : 'MANUAL',
   });
   drawerOpen.value = true;
 }
@@ -144,8 +173,6 @@ async function saveCompletion() {
       employeeId: form.employeeId,
       courseId: form.courseId,
       completedOn: form.completedOn,
-      expirySource: form.expirySource,
-      ...(form.expirySource === 'MANUAL' ? { expiresOn: form.expiresOn } : {}),
     };
     const saved = await adminRepository.createCompletion(payload);
     drawerOpen.value = false;
@@ -215,7 +242,7 @@ watch(includeVoided, applySearch);
     <form class="search-toolbar" @submit.prevent="applySearch">
       <label class="field search-field">
         <span>Search</span>
-        <input v-model="search" type="search" placeholder="Search employee, course, or code" />
+        <input v-model="search" type="search" placeholder="Search employee or course" />
       </label>
       <label class="checkbox-field">
         <input v-model="includeVoided" type="checkbox" />
@@ -256,11 +283,9 @@ watch(includeVoided, applySearch);
               >
                 <td>
                   <strong>{{ completion.employee.displayName }}</strong>
-                  <span>{{ completion.employee.jobTitle }}</span>
                 </td>
                 <td>
-                  <strong>{{ completion.course.code }}</strong>
-                  <span>{{ completion.course.name }}</span>
+                  <strong>{{ completion.course.name }}</strong>
                 </td>
                 <td>{{ formatDate(completion.completedOn) }}</td>
                 <td>{{ formatDate(completion.expiresOn) }}</td>
@@ -288,7 +313,7 @@ watch(includeVoided, applySearch);
         :title="selected?.employee?.displayName || 'Completion detail'"
         :subtitle="
           selected?.course
-            ? `${selected.course.code} · ${selected.course.name}`
+            ? selected.course.name
             : 'Select a completion to inspect its immutable record.'
         "
       >
@@ -306,12 +331,9 @@ watch(includeVoided, applySearch);
           </div>
           <dl class="detail-list">
             <div>
-              <dt>Expiry source</dt>
+              <dt>Validity applied</dt>
               <dd>
-                {{ selected.expirySource === 'CALCULATED' ? 'Calculated' : 'Manual' }}
-                <span v-if="selected.validityMonthsApplied">
-                  using {{ selected.validityMonthsApplied }} months
-                </span>
+                {{ selected.validityMonthsApplied ? `${selected.validityMonthsApplied} months` : 'Legacy saved expiry' }}
               </dd>
             </div>
             <div>
@@ -341,7 +363,7 @@ watch(includeVoided, applySearch);
       <select v-model="form.employeeId" required>
         <option value="" disabled>Select an employee</option>
         <option v-for="employee in employees" :key="employee.id" :value="employee.id">
-          {{ employee.displayName }} · {{ employee.jobTitle }}
+          {{ employee.displayName }}
         </option>
       </select>
       <small v-if="fieldErrors.employeeId" class="field-error">{{ fieldErrors.employeeId[0] }}</small>
@@ -350,9 +372,29 @@ watch(includeVoided, applySearch);
       <span>Course</span>
       <select v-model="form.courseId" required>
         <option value="" disabled>Select a course</option>
-        <option v-for="course in courses" :key="course.id" :value="course.id">
-          {{ course.code }} · {{ course.name }}
-        </option>
+        <optgroup v-if="generalCourses.length" label="General courses">
+          <option v-for="course in generalCourses" :key="course.id" :value="course.id">
+            {{ course.name }}
+          </option>
+        </optgroup>
+        <optgroup
+          v-for="group in siteCourseGroups"
+          :key="group.site.id"
+          :label="group.site.name"
+        >
+          <option
+            v-for="course in group.courses"
+            :key="`${group.site.id}:${course.id}`"
+            :value="course.id"
+          >
+            {{ course.name }}
+          </option>
+        </optgroup>
+        <optgroup v-if="otherCourses.length" label="Other courses">
+          <option v-for="course in otherCourses" :key="course.id" :value="course.id">
+            {{ course.name }}
+          </option>
+        </optgroup>
       </select>
       <small v-if="fieldErrors.courseId" class="field-error">{{ fieldErrors.courseId[0] }}</small>
     </label>
@@ -360,32 +402,13 @@ watch(includeVoided, applySearch);
       <span>Completed on</span>
       <input v-model="form.completedOn" type="date" required />
     </label>
-    <fieldset class="choice-group">
-      <legend>Expiry source</legend>
-      <label>
-        <input v-model="form.expirySource" type="radio" value="CALCULATED" />
-        Calculate from course validity
-      </label>
-      <label>
-        <input v-model="form.expirySource" type="radio" value="MANUAL" />
-        Enter certificate expiry
-      </label>
-    </fieldset>
-    <div v-if="form.expirySource === 'CALCULATED'" class="calculation-preview">
+    <div class="calculation-preview">
       <strong v-if="calculatedExpiry">Expires {{ formatDate(calculatedExpiry) }}</strong>
-      <span v-if="selectedCourse?.defaultValidityMonths">
-        Calendar-month calculation using {{ selectedCourse.defaultValidityMonths }} months.
+      <span v-if="selectedCourse?.validityMonths">
+        Calendar-month calculation using {{ selectedCourse.validityMonths }} months.
       </span>
-      <span v-else>Select a course with a default validity period, or choose manual expiry.</span>
-      <small v-if="fieldErrors.expirySource" class="field-error">
-        {{ fieldErrors.expirySource[0] }}
-      </small>
+      <span v-else>Select a course to preview its expiry.</span>
     </div>
-    <label v-else class="field">
-      <span>Expires on</span>
-      <input v-model="form.expiresOn" type="date" :min="form.completedOn" required />
-      <small v-if="fieldErrors.expiresOn" class="field-error">{{ fieldErrors.expiresOn[0] }}</small>
-    </label>
   </FormDrawer>
 
   <Teleport to="body">

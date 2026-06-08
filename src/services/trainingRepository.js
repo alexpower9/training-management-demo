@@ -1,5 +1,4 @@
 import {
-  customers,
   employees,
   getDemoSiteCourses,
   getDemoSiteReadiness,
@@ -14,12 +13,7 @@ const demoRepository = {
     return employees.filter((employee) => employee.active);
   },
   async listSites() {
-    return sites
-      .filter((site) => site.active)
-      .map((site) => ({
-        ...site,
-        customer: customers.find((customer) => customer.id === site.customerId),
-      }));
+    return sites.filter((site) => site.active);
   },
   async listSiteCourses(siteId, asOf) {
     return getDemoSiteCourses(siteId, asOf);
