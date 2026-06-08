@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addCalendarMonths, daysBetween, formatDateOnly, parseDateOnly } from './dates.js';
+import {
+  addCalendarMonths,
+  daysBetween,
+  formatDateOnly,
+  isValidTimeZone,
+  parseDateOnly,
+} from './dates.js';
 
 test('calendar-month expiry clamps to the target month end', () => {
   assert.equal(addCalendarMonths('2026-01-31', 1), '2026-02-28');
@@ -17,4 +23,9 @@ test('date-only conversion remains stable in UTC', () => {
   const value = parseDateOnly('2026-06-05');
   assert.equal(formatDateOnly(value), '2026-06-05');
   assert.equal(daysBetween('2026-06-05', '2026-06-20'), 15);
+});
+
+test('site time zones must be valid IANA identifiers', () => {
+  assert.equal(isValidTimeZone('America/St_Johns'), true);
+  assert.equal(isValidTimeZone('Not/A_Time_Zone'), false);
 });

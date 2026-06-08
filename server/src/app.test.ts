@@ -39,9 +39,6 @@ test('viewer mutations are rejected before database access', async () => {
     },
     payload: {
       displayName: 'Test Employee',
-      jobTitle: 'Technician',
-      crew: 'Field Service',
-      homeBase: 'Labrador City',
     },
   });
 

@@ -1,22 +1,19 @@
-import { CompletionExpirySource, Prisma, type PrismaClient } from '@prisma/client';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { Prisma } from '@prisma/client';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authenticate, requireAdmin } from './auth.js';
 import { getPrisma } from './database.js';
 import {
   addCalendarMonths,
   formatDateOnly,
+  isValidTimeZone,
   parseDateOnly,
-  todayInTimeZone,
 } from './dates.js';
 import { AppError } from './errors.js';
 import {
   dateOnlyString,
-  editConflict,
   ensureFound,
-  expectedVersion,
   identifier,
-  jsonSnapshot,
   pageResult,
   paginationQuery,
   parseId,
@@ -24,83 +21,41 @@ import {
 
 const employeeInput = z.object({
   displayName: z.string().trim().min(1).max(160),
-  jobTitle: z.string().trim().min(1).max(120),
-  crew: z.string().trim().max(120).nullable().optional(),
-  homeBase: z.string().trim().max(120).nullable().optional(),
-});
-const customerInput = z.object({
-  name: z.string().trim().min(1).max(160),
-  contact: z.string().trim().max(160).nullable().optional(),
 });
 const siteInput = z.object({
-  customerId: identifier,
   name: z.string().trim().min(1).max(160),
-  region: z.string().trim().max(160).nullable().optional(),
-  timeZone: z.string().trim().min(1).max(80),
+  timeZone: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .refine(isValidTimeZone, 'Enter a valid IANA time zone.'),
 });
-const courseInput = z.object({
-  code: z.string().trim().min(1).max(50),
-  name: z.string().trim().min(1).max(180),
-  category: z.string().trim().max(100).nullable().optional(),
-  defaultValidityMonths: z.number().int().min(1).max(120).nullable().optional(),
-});
-const versionBody = z.object({ expectedVersion });
-const requirementInput = z.object({
-  siteId: identifier,
-  courseId: identifier,
-  effectiveFrom: dateOnlyString,
-  effectiveTo: dateOnlyString.nullable().optional(),
-  warningDays: z.number().int().min(0).max(365).default(45),
-});
-const completionInput = z
-  .object({
-    employeeId: identifier,
-    courseId: identifier,
-    completedOn: dateOnlyString,
-    expirySource: z.nativeEnum(CompletionExpirySource),
-    expiresOn: dateOnlyString.optional(),
-  })
-  .superRefine((value, context) => {
-    if (value.expirySource === CompletionExpirySource.MANUAL && !value.expiresOn) {
+const siteIdsInput = z
+  .array(identifier)
+  .min(1, 'Select at least one site.')
+  .max(1000)
+  .superRefine((siteIds, context) => {
+    if (new Set(siteIds).size !== siteIds.length) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['expiresOn'],
-        message: 'An expiry date is required for manual expiry.',
+        message: 'Each site may only be selected once.',
       });
     }
   });
+const courseInput = z.object({
+  name: z.string().trim().min(1).max(180),
+  validityMonths: z.number().int().min(1).max(120),
+  siteIds: siteIdsInput,
+});
+const completionInput = z.object({
+  employeeId: identifier,
+  courseId: identifier,
+  completedOn: dateOnlyString,
+});
 const voidInput = z.object({
   reason: z.string().trim().min(3).max(500),
 });
-
-type Transaction = Prisma.TransactionClient;
-
-function jsonValue(value: unknown) {
-  return jsonSnapshot(value) as Prisma.InputJsonValue;
-}
-
-async function audit(
-  tx: Transaction,
-  request: FastifyRequest,
-  action: string,
-  entityType: string,
-  entityId: string,
-  beforeData: unknown,
-  afterData: unknown,
-) {
-  await tx.auditEvent.create({
-    data: {
-      actorSubject: request.auth.subject,
-      actorName: request.auth.userName,
-      action,
-      entityType,
-      entityId,
-      requestId: request.id,
-      beforeData: beforeData === null ? Prisma.JsonNull : jsonValue(beforeData),
-      afterData: afterData === null ? Prisma.JsonNull : jsonValue(afterData),
-    },
-  });
-}
 
 function activeFilter(includeArchived: string) {
   return includeArchived === 'true' ? {} : { archivedAt: null };
@@ -114,87 +69,39 @@ function dateFields<T extends { completedOn: Date; expiresOn: Date }>(row: T) {
   };
 }
 
-async function updateEmployee(
-  prisma: PrismaClient,
-  request: FastifyRequest,
-  id: string,
-  body: z.infer<typeof employeeInput> & { expectedVersion: number },
+async function validateCourseSiteSelection(
+  transaction: Prisma.TransactionClient,
+  siteIds: string[],
+  existingSiteIds = new Set<string>(),
 ) {
-  const { expectedVersion: version, ...data } = body;
-  return prisma.$transaction(async (tx) => {
-    const before = await tx.employee.findUnique({ where: { id } });
-    ensureFound(before, 'EMPLOYEE_NOT_FOUND', 'The employee was not found.');
-    const result = await tx.employee.updateMany({
-      where: { id, version },
-      data: { ...data, version: { increment: 1 } },
-    });
-    if (!result.count) throw editConflict();
-    const after = await tx.employee.findUniqueOrThrow({ where: { id } });
-    await audit(tx, request, 'employee.updated', 'employee', id, before, after);
-    return after;
+  const sites = await transaction.site.findMany({
+    where: { id: { in: siteIds } },
+    select: { id: true, archivedAt: true },
   });
+  if (sites.length !== siteIds.length) {
+    throw new AppError(
+      400,
+      'INVALID_SITE_SELECTION',
+      'One or more selected sites do not exist.',
+      { siteIds: ['Select valid sites.'] },
+    );
+  }
+
+  const newlySelectedArchivedSite = sites.some(
+    (site) => site.archivedAt && !existingSiteIds.has(site.id),
+  );
+  if (newlySelectedArchivedSite) {
+    throw new AppError(
+      400,
+      'ARCHIVED_SITE_SELECTION',
+      'Archived sites cannot be newly assigned to a course.',
+      { siteIds: ['Remove newly selected archived sites.'] },
+    );
+  }
 }
 
 export async function registerAdminRoutes(app: FastifyInstance) {
   const admin = { preHandler: [authenticate, requireAdmin] };
-
-  app.get('/api/v1/admin/overview', admin, async () => {
-    const prisma = await getPrisma();
-    const now = new Date();
-    const today = parseDateOnly(new Date().toISOString().slice(0, 10));
-    const soon = new Date(today.getTime() + 45 * 86400000);
-    const [
-      employees,
-      customers,
-      sites,
-      courses,
-      recentCompletions,
-      expiringCompletions,
-      sitesWithRequirements,
-      recentAudit,
-    ] = await Promise.all([
-      prisma.employee.count({ where: { archivedAt: null } }),
-      prisma.customer.count({ where: { archivedAt: null } }),
-      prisma.site.count({ where: { archivedAt: null } }),
-      prisma.course.count({ where: { archivedAt: null } }),
-      prisma.courseCompletion.count({
-        where: {
-          voidedAt: null,
-          recordedAt: { gte: new Date(now.getTime() - 30 * 86400000) },
-        },
-      }),
-      prisma.courseCompletion.count({
-        where: {
-          voidedAt: null,
-          expiresOn: { gte: today, lte: soon },
-        },
-      }),
-      prisma.siteCourseRequirement.groupBy({
-        by: ['siteId'],
-        where: {
-          effectiveFrom: { lte: today },
-          OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }],
-        },
-      }),
-      prisma.auditEvent.findMany({
-        orderBy: { occurredAt: 'desc' },
-        take: 8,
-      }),
-    ]);
-
-    return {
-      metrics: {
-        employees,
-        customers,
-        sites,
-        courses,
-        recentCompletions,
-        expiringCompletions,
-        sitesWithoutRequirements: Math.max(0, sites - sitesWithRequirements.length),
-      },
-      recentAudit,
-    };
-  });
 
   app.get('/api/v1/admin/employees', admin, async (request) => {
     const query = paginationQuery(request);
@@ -202,14 +109,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const where: Prisma.EmployeeWhereInput = {
       ...activeFilter(query.includeArchived),
       ...(query.search
-        ? {
-            OR: [
-              { displayName: { contains: query.search, mode: 'insensitive' } },
-              { jobTitle: { contains: query.search, mode: 'insensitive' } },
-              { crew: { contains: query.search, mode: 'insensitive' } },
-              { homeBase: { contains: query.search, mode: 'insensitive' } },
-            ],
-          }
+        ? { displayName: { contains: query.search, mode: 'insensitive' } }
         : {}),
     };
     const [items, total] = await Promise.all([
@@ -244,8 +144,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/v1/admin/employees/:id', admin, async (request) => {
-    const prisma = await getPrisma();
-    const employee = await prisma.employee.findUnique({
+    const employee = await (await getPrisma()).employee.findUnique({
       where: { id: parseId(request) },
       include: {
         completions: {
@@ -262,193 +161,56 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/v1/admin/employees', admin, async (request, reply) => {
-    const data = employeeInput.parse(request.body);
-    const prisma = await getPrisma();
-    const employee = await prisma.$transaction(async (tx) => {
-      const created = await tx.employee.create({ data });
-      await audit(tx, request, 'employee.created', 'employee', created.id, null, created);
-      return created;
+    const employee = await (await getPrisma()).employee.create({
+      data: employeeInput.parse(request.body),
     });
     return reply.status(201).send(employee);
   });
 
   app.patch('/api/v1/admin/employees/:id', admin, async (request) => {
-    const data = employeeInput.partial().merge(versionBody).parse(request.body);
-    return updateEmployee(await getPrisma(), request, parseId(request), {
-      displayName: data.displayName,
-      jobTitle: data.jobTitle,
-      crew: data.crew,
-      homeBase: data.homeBase,
-      expectedVersion: data.expectedVersion,
-    } as z.infer<typeof employeeInput> & { expectedVersion: number });
+    const id = parseId(request);
+    const prisma = await getPrisma();
+    ensureFound(
+      await prisma.employee.findUnique({ where: { id } }),
+      'EMPLOYEE_NOT_FOUND',
+      'The employee was not found.',
+    );
+    return prisma.employee.update({
+      where: { id },
+      data: employeeInput.partial().parse(request.body),
+    });
   });
 
   for (const action of ['archive', 'restore'] as const) {
     app.post(`/api/v1/admin/employees/:id/${action}`, admin, async (request) => {
-      const { expectedVersion: version } = versionBody.parse(request.body);
       const id = parseId(request);
       const prisma = await getPrisma();
-      return prisma.$transaction(async (tx) => {
-        const before = await tx.employee.findUnique({ where: { id } });
-        ensureFound(before, 'EMPLOYEE_NOT_FOUND', 'The employee was not found.');
-        const result = await tx.employee.updateMany({
-          where: { id, version },
-          data: {
-            archivedAt: action === 'archive' ? new Date() : null,
-            version: { increment: 1 },
-          },
-        });
-        if (!result.count) throw editConflict();
-        const after = await tx.employee.findUniqueOrThrow({ where: { id } });
-        await audit(
-          tx,
-          request,
-          `employee.${action}d`,
-          'employee',
-          id,
-          before,
-          after,
-        );
-        return after;
-      });
-    });
-  }
-
-  app.get('/api/v1/admin/customers', admin, async (request) => {
-    const query = paginationQuery(request);
-    const prisma = await getPrisma();
-    const where: Prisma.CustomerWhereInput = {
-      ...activeFilter(query.includeArchived),
-      ...(query.search
-        ? { name: { contains: query.search, mode: 'insensitive' } }
-        : {}),
-    };
-    const [items, total] = await Promise.all([
-      prisma.customer.findMany({
-        where,
-        include: {
-          sites: {
-            include: {
-              _count: { select: { requirements: true } },
-            },
-            orderBy: { name: 'asc' },
-          },
-        },
-        orderBy: { name: 'asc' },
-        skip: (query.page - 1) * query.pageSize,
-        take: query.pageSize,
-      }),
-      prisma.customer.count({ where }),
-    ]);
-    return pageResult(items, total, query.page, query.pageSize);
-  });
-
-  app.get('/api/v1/admin/customers/:id', admin, async (request) => {
-    const customer = await (await getPrisma()).customer.findUnique({
-      where: { id: parseId(request) },
-      include: {
-        sites: {
-          include: { _count: { select: { requirements: true } } },
-          orderBy: { name: 'asc' },
-        },
-      },
-    });
-    ensureFound(customer, 'CUSTOMER_NOT_FOUND', 'The customer was not found.');
-    return customer;
-  });
-
-  app.post('/api/v1/admin/customers', admin, async (request, reply) => {
-    const data = customerInput.parse(request.body);
-    const prisma = await getPrisma();
-    const customer = await prisma.$transaction(async (tx) => {
-      const created = await tx.customer.create({ data });
-      await audit(tx, request, 'customer.created', 'customer', created.id, null, created);
-      return created;
-    });
-    return reply.status(201).send(customer);
-  });
-
-  app.patch('/api/v1/admin/customers/:id', admin, async (request) => {
-    const { expectedVersion: version, ...data } = customerInput
-      .partial()
-      .merge(versionBody)
-      .parse(request.body);
-    const id = parseId(request);
-    const prisma = await getPrisma();
-    return prisma.$transaction(async (tx) => {
-      const before = await tx.customer.findUnique({ where: { id } });
-      ensureFound(before, 'CUSTOMER_NOT_FOUND', 'The customer was not found.');
-      const result = await tx.customer.updateMany({
-        where: { id, version },
-        data: { ...data, version: { increment: 1 } },
-      });
-      if (!result.count) throw editConflict();
-      const after = await tx.customer.findUniqueOrThrow({ where: { id } });
-      await audit(tx, request, 'customer.updated', 'customer', id, before, after);
-      return after;
-    });
-  });
-
-  for (const action of ['archive', 'restore'] as const) {
-    app.post(`/api/v1/admin/customers/:id/${action}`, admin, async (request) => {
-      const { expectedVersion: version } = versionBody.parse(request.body);
-      const id = parseId(request);
-      const prisma = await getPrisma();
-      return prisma.$transaction(async (tx) => {
-        const before = await tx.customer.findUnique({
-          where: { id },
-          include: { sites: { where: { archivedAt: null } } },
-        });
-        ensureFound(before, 'CUSTOMER_NOT_FOUND', 'The customer was not found.');
-        if (action === 'archive' && before.sites.length) {
-          throw new AppError(
-            409,
-            'CUSTOMER_HAS_ACTIVE_SITES',
-            'Archive all customer sites before archiving the customer.',
-          );
-        }
-        const result = await tx.customer.updateMany({
-          where: { id, version },
-          data: {
-            archivedAt: action === 'archive' ? new Date() : null,
-            version: { increment: 1 },
-          },
-        });
-        if (!result.count) throw editConflict();
-        const after = await tx.customer.findUniqueOrThrow({ where: { id } });
-        await audit(tx, request, `customer.${action}d`, 'customer', id, before, after);
-        return after;
+      ensureFound(
+        await prisma.employee.findUnique({ where: { id } }),
+        'EMPLOYEE_NOT_FOUND',
+        'The employee was not found.',
+      );
+      return prisma.employee.update({
+        where: { id },
+        data: { archivedAt: action === 'archive' ? new Date() : null },
       });
     });
   }
 
   app.get('/api/v1/admin/sites', admin, async (request) => {
     const query = paginationQuery(request);
-    const customerId = z
-      .object({ customerId: identifier.optional() })
-      .parse(request.query).customerId;
     const prisma = await getPrisma();
     const where: Prisma.SiteWhereInput = {
       ...activeFilter(query.includeArchived),
-      customerId,
       ...(query.search
-        ? {
-            OR: [
-              { name: { contains: query.search, mode: 'insensitive' } },
-              { region: { contains: query.search, mode: 'insensitive' } },
-              { customer: { name: { contains: query.search, mode: 'insensitive' } } },
-            ],
-          }
+        ? { name: { contains: query.search, mode: 'insensitive' } }
         : {}),
     };
     const [items, total] = await Promise.all([
       prisma.site.findMany({
         where,
-        include: {
-          customer: true,
-          _count: { select: { requirements: true } },
-        },
-        orderBy: [{ customer: { name: 'asc' } }, { name: 'asc' }],
+        include: { _count: { select: { requirements: true } } },
+        orderBy: { name: 'asc' },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
       }),
@@ -457,101 +219,64 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return pageResult(items, total, query.page, query.pageSize);
   });
 
+  app.get('/api/v1/admin/site-options', admin, async () => {
+    return (await getPrisma()).site.findMany({
+      select: {
+        id: true,
+        name: true,
+        archivedAt: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+  });
+
   app.get('/api/v1/admin/sites/:id', admin, async (request) => {
     const site = await (await getPrisma()).site.findUnique({
       where: { id: parseId(request) },
       include: {
-        customer: true,
         requirements: {
           include: { course: true },
-          orderBy: [{ effectiveTo: 'asc' }, { course: { name: 'asc' } }],
+          orderBy: { course: { name: 'asc' } },
         },
       },
     });
     ensureFound(site, 'SITE_NOT_FOUND', 'The site was not found.');
-    return {
-      ...site,
-      requirements: site.requirements.map((requirement) => ({
-        ...requirement,
-        effectiveFrom: formatDateOnly(requirement.effectiveFrom),
-        effectiveTo: requirement.effectiveTo
-          ? formatDateOnly(requirement.effectiveTo)
-          : null,
-      })),
-    };
+    return site;
   });
 
   app.post('/api/v1/admin/sites', admin, async (request, reply) => {
-    const data = siteInput.parse(request.body);
-    const prisma = await getPrisma();
-    const customer = await prisma.customer.findFirst({
-      where: { id: data.customerId, archivedAt: null },
-    });
-    ensureFound(customer, 'CUSTOMER_NOT_FOUND', 'The customer was not found.');
-    const site = await prisma.$transaction(async (tx) => {
-      const created = await tx.site.create({ data });
-      await audit(tx, request, 'site.created', 'site', created.id, null, created);
-      return created;
+    const site = await (await getPrisma()).site.create({
+      data: siteInput.parse(request.body),
     });
     return reply.status(201).send(site);
   });
 
   app.patch('/api/v1/admin/sites/:id', admin, async (request) => {
-    const { expectedVersion: version, ...data } = siteInput
-      .partial()
-      .merge(versionBody)
-      .parse(request.body);
     const id = parseId(request);
     const prisma = await getPrisma();
-    if (data.customerId) {
-      const customer = await prisma.customer.findFirst({
-        where: { id: data.customerId, archivedAt: null },
-      });
-      ensureFound(customer, 'CUSTOMER_NOT_FOUND', 'The customer was not found.');
-    }
-    return prisma.$transaction(async (tx) => {
-      const before = await tx.site.findUnique({ where: { id } });
-      ensureFound(before, 'SITE_NOT_FOUND', 'The site was not found.');
-      const result = await tx.site.updateMany({
-        where: { id, version },
-        data: { ...data, version: { increment: 1 } },
-      });
-      if (!result.count) throw editConflict();
-      const after = await tx.site.findUniqueOrThrow({ where: { id } });
-      await audit(tx, request, 'site.updated', 'site', id, before, after);
-      return after;
+    ensureFound(
+      await prisma.site.findUnique({ where: { id } }),
+      'SITE_NOT_FOUND',
+      'The site was not found.',
+    );
+    return prisma.site.update({
+      where: { id },
+      data: siteInput.partial().parse(request.body),
     });
   });
 
   for (const action of ['archive', 'restore'] as const) {
     app.post(`/api/v1/admin/sites/:id/${action}`, admin, async (request) => {
-      const { expectedVersion: version } = versionBody.parse(request.body);
       const id = parseId(request);
       const prisma = await getPrisma();
-      return prisma.$transaction(async (tx) => {
-        const before = await tx.site.findUnique({
-          where: { id },
-          include: { customer: true },
-        });
-        ensureFound(before, 'SITE_NOT_FOUND', 'The site was not found.');
-        if (action === 'restore' && before.customer.archivedAt) {
-          throw new AppError(
-            409,
-            'CUSTOMER_ARCHIVED',
-            'Restore the customer before restoring this site.',
-          );
-        }
-        const result = await tx.site.updateMany({
-          where: { id, version },
-          data: {
-            archivedAt: action === 'archive' ? new Date() : null,
-            version: { increment: 1 },
-          },
-        });
-        if (!result.count) throw editConflict();
-        const after = await tx.site.findUniqueOrThrow({ where: { id } });
-        await audit(tx, request, `site.${action}d`, 'site', id, before, after);
-        return after;
+      ensureFound(
+        await prisma.site.findUnique({ where: { id } }),
+        'SITE_NOT_FOUND',
+        'The site was not found.',
+      );
+      return prisma.site.update({
+        where: { id },
+        data: { archivedAt: action === 'archive' ? new Date() : null },
       });
     });
   }
@@ -563,24 +288,15 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       ...activeFilter(query.includeArchived),
       ...(query.search
         ? {
-            OR: [
-              { code: { contains: query.search, mode: 'insensitive' } },
-              { name: { contains: query.search, mode: 'insensitive' } },
-              { category: { contains: query.search, mode: 'insensitive' } },
-            ],
+            name: { contains: query.search, mode: 'insensitive' },
           }
         : {}),
     };
     const [items, total] = await Promise.all([
       prisma.course.findMany({
         where,
-        include: {
-          requirements: {
-            where: { effectiveTo: null },
-            include: { site: { include: { customer: true } } },
-          },
-        },
-        orderBy: [{ code: 'asc' }],
+        include: { requirements: { include: { site: true } } },
+        orderBy: { name: 'asc' },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
       }),
@@ -594,8 +310,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       where: { id: parseId(request) },
       include: {
         requirements: {
-          include: { site: { include: { customer: true } } },
-          orderBy: { effectiveFrom: 'desc' },
+          include: { site: true },
+          orderBy: { site: { name: 'asc' } },
         },
         completions: {
           where: { voidedAt: null },
@@ -608,221 +324,92 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     ensureFound(course, 'COURSE_NOT_FOUND', 'The course was not found.');
     return {
       ...course,
-      requirements: course.requirements.map((requirement) => ({
-        ...requirement,
-        effectiveFrom: formatDateOnly(requirement.effectiveFrom),
-        effectiveTo: requirement.effectiveTo
-          ? formatDateOnly(requirement.effectiveTo)
-          : null,
-      })),
       completions: course.completions.map(dateFields),
     };
   });
 
   app.post('/api/v1/admin/courses', admin, async (request, reply) => {
     const data = courseInput.parse(request.body);
-    const prisma = await getPrisma();
-    const course = await prisma.$transaction(async (tx) => {
-      const created = await tx.course.create({
-        data: { ...data, code: data.code.toUpperCase() },
+    const course = await (await getPrisma()).$transaction(async (transaction) => {
+      await validateCourseSiteSelection(transaction, data.siteIds);
+      return transaction.course.create({
+        data: {
+          name: data.name,
+          validityMonths: data.validityMonths,
+          requirements: {
+            create: data.siteIds.map((siteId) => ({ siteId })),
+          },
+        },
+        include: { requirements: { include: { site: true } } },
       });
-      await audit(tx, request, 'course.created', 'course', created.id, null, created);
-      return created;
     });
     return reply.status(201).send(course);
   });
 
   app.patch('/api/v1/admin/courses/:id', admin, async (request) => {
-    const { expectedVersion: version, ...parsed } = courseInput
-      .partial()
-      .merge(versionBody)
-      .parse(request.body);
-    const data = {
-      ...parsed,
-      ...(parsed.code ? { code: parsed.code.toUpperCase() } : {}),
-    };
     const id = parseId(request);
+    const data = courseInput.parse(request.body);
     const prisma = await getPrisma();
-    return prisma.$transaction(async (tx) => {
-      const before = await tx.course.findUnique({ where: { id } });
-      ensureFound(before, 'COURSE_NOT_FOUND', 'The course was not found.');
-      const result = await tx.course.updateMany({
-        where: { id, version },
-        data: { ...data, version: { increment: 1 } },
+    return prisma.$transaction(async (transaction) => {
+      const course = await transaction.course.findUnique({
+        where: { id },
+        include: { requirements: true },
       });
-      if (!result.count) throw editConflict();
-      const after = await tx.course.findUniqueOrThrow({ where: { id } });
-      await audit(tx, request, 'course.updated', 'course', id, before, after);
-      return after;
+      ensureFound(course, 'COURSE_NOT_FOUND', 'The course was not found.');
+
+      const existingSiteIds = new Set(
+        course.requirements.map((requirement) => requirement.siteId),
+      );
+      await validateCourseSiteSelection(
+        transaction,
+        data.siteIds,
+        existingSiteIds,
+      );
+
+      await transaction.siteCourseRequirement.deleteMany({
+        where: {
+          courseId: id,
+          siteId: { notIn: data.siteIds },
+        },
+      });
+      await transaction.siteCourseRequirement.createMany({
+        data: data.siteIds
+          .filter((siteId) => !existingSiteIds.has(siteId))
+          .map((siteId) => ({ siteId, courseId: id })),
+        skipDuplicates: true,
+      });
+
+      return transaction.course.update({
+        where: { id },
+        data: {
+          name: data.name,
+          validityMonths: data.validityMonths,
+        },
+        include: {
+          requirements: {
+            include: { site: true },
+            orderBy: { site: { name: 'asc' } },
+          },
+        },
+      });
     });
   });
 
   for (const action of ['archive', 'restore'] as const) {
     app.post(`/api/v1/admin/courses/:id/${action}`, admin, async (request) => {
-      const { expectedVersion: version } = versionBody.parse(request.body);
       const id = parseId(request);
       const prisma = await getPrisma();
-      return prisma.$transaction(async (tx) => {
-        const before = await tx.course.findUnique({
-          where: { id },
-          include: { requirements: { where: { effectiveTo: null } } },
-        });
-        ensureFound(before, 'COURSE_NOT_FOUND', 'The course was not found.');
-        if (action === 'archive' && before.requirements.length) {
-          throw new AppError(
-            409,
-            'COURSE_HAS_OPEN_REQUIREMENTS',
-            'End all open site requirements before archiving the course.',
-          );
-        }
-        const result = await tx.course.updateMany({
-          where: { id, version },
-          data: {
-            archivedAt: action === 'archive' ? new Date() : null,
-            version: { increment: 1 },
-          },
-        });
-        if (!result.count) throw editConflict();
-        const after = await tx.course.findUniqueOrThrow({ where: { id } });
-        await audit(tx, request, `course.${action}d`, 'course', id, before, after);
-        return after;
+      ensureFound(
+        await prisma.course.findUnique({ where: { id } }),
+        'COURSE_NOT_FOUND',
+        'The course was not found.',
+      );
+      return prisma.course.update({
+        where: { id },
+        data: { archivedAt: action === 'archive' ? new Date() : null },
       });
     });
   }
-
-  app.post('/api/v1/admin/requirements', admin, async (request, reply) => {
-    const data = requirementInput.parse(request.body);
-    const prisma = await getPrisma();
-    const [site, course] = await Promise.all([
-      prisma.site.findFirst({
-        where: { id: data.siteId, archivedAt: null, customer: { archivedAt: null } },
-      }),
-      prisma.course.findFirst({ where: { id: data.courseId, archivedAt: null } }),
-    ]);
-    ensureFound(site, 'SITE_NOT_FOUND', 'The site was not found.');
-    ensureFound(course, 'COURSE_NOT_FOUND', 'The course was not found.');
-    const requirement = await prisma.$transaction(async (tx) => {
-      const created = await tx.siteCourseRequirement.create({
-        data: {
-          ...data,
-          effectiveFrom: parseDateOnly(data.effectiveFrom),
-          effectiveTo: data.effectiveTo ? parseDateOnly(data.effectiveTo) : null,
-          createdBySubject: request.auth.subject,
-        },
-      });
-      await audit(
-        tx,
-        request,
-        'requirement.created',
-        'site_course_requirement',
-        created.id,
-        null,
-        created,
-      );
-      return created;
-    });
-    return reply.status(201).send({
-      ...requirement,
-      effectiveFrom: formatDateOnly(requirement.effectiveFrom),
-      effectiveTo: requirement.effectiveTo
-        ? formatDateOnly(requirement.effectiveTo)
-        : null,
-    });
-  });
-
-  app.patch('/api/v1/admin/requirements/:id', admin, async (request) => {
-    const data = requirementInput.partial().merge(versionBody).parse(request.body);
-    const id = parseId(request);
-    const prisma = await getPrisma();
-    return prisma.$transaction(async (tx) => {
-      const before = await tx.siteCourseRequirement.findUnique({
-        where: { id },
-        include: { site: true },
-      });
-      ensureFound(before, 'REQUIREMENT_NOT_FOUND', 'The requirement was not found.');
-      const today = todayInTimeZone(before.site.timeZone);
-      if (formatDateOnly(before.effectiveFrom) <= today) {
-        throw new AppError(
-          409,
-          'REQUIREMENT_ALREADY_EFFECTIVE',
-          'An effective requirement must be ended and replaced.',
-        );
-      }
-      const {
-        expectedVersion: version,
-        effectiveFrom,
-        effectiveTo,
-        ...updateData
-      } = data;
-      const result = await tx.siteCourseRequirement.updateMany({
-        where: { id, version },
-        data: {
-          ...updateData,
-          ...(effectiveFrom ? { effectiveFrom: parseDateOnly(effectiveFrom) } : {}),
-          ...(effectiveTo !== undefined
-            ? { effectiveTo: effectiveTo ? parseDateOnly(effectiveTo) : null }
-            : {}),
-          version: { increment: 1 },
-        },
-      });
-      if (!result.count) throw editConflict();
-      const after = await tx.siteCourseRequirement.findUniqueOrThrow({ where: { id } });
-      await audit(
-        tx,
-        request,
-        'requirement.updated',
-        'site_course_requirement',
-        id,
-        before,
-        after,
-      );
-      return {
-        ...after,
-        effectiveFrom: formatDateOnly(after.effectiveFrom),
-        effectiveTo: after.effectiveTo ? formatDateOnly(after.effectiveTo) : null,
-      };
-    });
-  });
-
-  app.post('/api/v1/admin/requirements/:id/end', admin, async (request) => {
-    const data = z
-      .object({ expectedVersion, effectiveTo: dateOnlyString })
-      .parse(request.body);
-    const id = parseId(request);
-    const prisma = await getPrisma();
-    return prisma.$transaction(async (tx) => {
-      const before = await tx.siteCourseRequirement.findUnique({ where: { id } });
-      ensureFound(before, 'REQUIREMENT_NOT_FOUND', 'The requirement was not found.');
-      const endDate = parseDateOnly(data.effectiveTo);
-      if (endDate < before.effectiveFrom) {
-        throw new AppError(
-          400,
-          'INVALID_REQUIREMENT_DATES',
-          'The end date cannot be before the start date.',
-        );
-      }
-      const result = await tx.siteCourseRequirement.updateMany({
-        where: { id, version: data.expectedVersion },
-        data: { effectiveTo: endDate, version: { increment: 1 } },
-      });
-      if (!result.count) throw editConflict();
-      const after = await tx.siteCourseRequirement.findUniqueOrThrow({ where: { id } });
-      await audit(
-        tx,
-        request,
-        'requirement.ended',
-        'site_course_requirement',
-        id,
-        before,
-        after,
-      );
-      return {
-        ...after,
-        effectiveFrom: formatDateOnly(after.effectiveFrom),
-        effectiveTo: formatDateOnly(after.effectiveTo!),
-      };
-    });
-  });
 
   app.get('/api/v1/admin/completions', admin, async (request) => {
     const query = paginationQuery(request);
@@ -847,7 +434,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
                 },
               },
               { course: { name: { contains: query.search, mode: 'insensitive' } } },
-              { course: { code: { contains: query.search, mode: 'insensitive' } } },
             ],
           }
         : {}),
@@ -875,51 +461,18 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     ensureFound(employee, 'EMPLOYEE_NOT_FOUND', 'The employee was not found.');
     ensureFound(course, 'COURSE_NOT_FOUND', 'The course was not found.');
 
-    let expiresOn = data.expiresOn;
-    let validityMonthsApplied: number | null = null;
-    if (data.expirySource === CompletionExpirySource.CALCULATED) {
-      if (!course.defaultValidityMonths) {
-        throw new AppError(
-          400,
-          'COURSE_VALIDITY_REQUIRED',
-          'This course does not have a default validity period.',
-          { expirySource: ['Choose manual expiry or configure the course validity.'] },
-        );
-      }
-      validityMonthsApplied = course.defaultValidityMonths;
-      expiresOn = addCalendarMonths(data.completedOn, validityMonthsApplied);
-    }
-    if (!expiresOn || expiresOn < data.completedOn) {
-      throw new AppError(
-        400,
-        'INVALID_EXPIRY_DATE',
-        'The expiry date must be on or after the completion date.',
-        { expiresOn: ['Enter a valid expiry date.'] },
-      );
-    }
+    const validityMonthsApplied = course.validityMonths;
+    const expiresOn = addCalendarMonths(data.completedOn, validityMonthsApplied);
 
-    const completion = await prisma.$transaction(async (tx) => {
-      const created = await tx.courseCompletion.create({
-        data: {
-          employeeId: data.employeeId,
-          courseId: data.courseId,
-          completedOn: parseDateOnly(data.completedOn),
-          expiresOn: parseDateOnly(expiresOn),
-          expirySource: data.expirySource,
-          validityMonthsApplied,
-          recordedBySubject: request.auth.subject,
-        },
-      });
-      await audit(
-        tx,
-        request,
-        'completion.created',
-        'course_completion',
-        created.id,
-        null,
-        created,
-      );
-      return created;
+    const completion = await prisma.courseCompletion.create({
+      data: {
+        employeeId: data.employeeId,
+        courseId: data.courseId,
+        completedOn: parseDateOnly(data.completedOn),
+        expiresOn: parseDateOnly(expiresOn),
+        validityMonthsApplied,
+        recordedBySubject: request.auth.subject,
+      },
     });
     return reply.status(201).send(dateFields(completion));
   });
@@ -928,66 +481,32 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const data = voidInput.parse(request.body);
     const id = parseId(request);
     const prisma = await getPrisma();
-    return prisma.$transaction(async (tx) => {
-      const before = await tx.courseCompletion.findUnique({ where: { id } });
-      ensureFound(before, 'COMPLETION_NOT_FOUND', 'The completion was not found.');
-      if (before.voidedAt) {
-        throw new AppError(409, 'COMPLETION_ALREADY_VOIDED', 'The completion is already voided.');
-      }
-      const after = await tx.courseCompletion.update({
-        where: { id },
-        data: {
-          voidedAt: new Date(),
-          voidedBySubject: request.auth.subject,
-          voidReason: data.reason,
-        },
-      });
-      await audit(
-        tx,
-        request,
-        'completion.voided',
-        'course_completion',
-        id,
-        before,
-        after,
-      );
-      return dateFields(after);
+    const result = await prisma.courseCompletion.updateMany({
+      where: { id, voidedAt: null },
+      data: {
+        voidedAt: new Date(),
+        voidedBySubject: request.auth.subject,
+        voidReason: data.reason,
+      },
     });
-  });
-
-  app.get('/api/v1/admin/audit-events', admin, async (request) => {
-    const query = paginationQuery(request);
-    const filters = z
-      .object({
-        entityType: z.string().trim().max(100).optional(),
-        entityId: identifier.optional(),
-        actorSubject: z.string().trim().max(255).optional(),
-      })
-      .parse(request.query);
-    const prisma = await getPrisma();
-    const where: Prisma.AuditEventWhereInput = {
-      entityType: filters.entityType,
-      entityId: filters.entityId,
-      actorSubject: filters.actorSubject,
-      ...(query.search
-        ? {
-            OR: [
-              { actorName: { contains: query.search, mode: 'insensitive' } },
-              { action: { contains: query.search, mode: 'insensitive' } },
-              { entityType: { contains: query.search, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
-    };
-    const [items, total] = await Promise.all([
-      prisma.auditEvent.findMany({
-        where,
-        orderBy: { occurredAt: 'desc' },
-        skip: (query.page - 1) * query.pageSize,
-        take: query.pageSize,
-      }),
-      prisma.auditEvent.count({ where }),
-    ]);
-    return pageResult(items, total, query.page, query.pageSize);
+    if (!result.count) {
+      ensureFound(
+        await prisma.courseCompletion.findUnique({ where: { id } }),
+        'COMPLETION_NOT_FOUND',
+        'The completion was not found.',
+      );
+      throw new AppError(
+        409,
+        'COMPLETION_ALREADY_VOIDED',
+        'The completion is already voided.',
+      );
+    }
+    const completion = await prisma.courseCompletion.findUnique({ where: { id } });
+    ensureFound(
+      completion,
+      'COMPLETION_NOT_FOUND',
+      'The completion was not found.',
+    );
+    return dateFields(completion);
   });
 }

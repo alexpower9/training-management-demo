@@ -32,9 +32,6 @@ const confirmOpen = ref(false);
 const confirmBusy = ref(false);
 const form = reactive({
   displayName: '',
-  jobTitle: '',
-  crew: '',
-  homeBase: '',
 });
 const initialForm = ref('');
 
@@ -46,9 +43,6 @@ const drawerTitle = computed(() =>
 function setForm(values = {}) {
   Object.assign(form, {
     displayName: values.displayName || '',
-    jobTitle: values.jobTitle || '',
-    crew: values.crew || '',
-    homeBase: values.homeBase || '',
   });
   initialForm.value = JSON.stringify(form);
   fieldErrors.value = {};
@@ -121,25 +115,18 @@ async function saveEmployee() {
   try {
     const payload = {
       displayName: form.displayName,
-      jobTitle: form.jobTitle,
-      crew: form.crew || null,
-      homeBase: form.homeBase || null,
     };
     const saved =
       formMode.value === 'create'
         ? await adminRepository.createEmployee(payload)
-        : await adminRepository.updateEmployee(selected.value.id, {
-            ...payload,
-            expectedVersion: selected.value.version,
-          });
+        : await adminRepository.updateEmployee(selected.value.id, payload);
     drawerOpen.value = false;
     addToast(formMode.value === 'create' ? 'Employee added.' : 'Employee updated.');
     await loadList();
     await selectEmployee(saved.id);
   } catch (error) {
     fieldErrors.value = error.fieldErrors || {};
-    errorMessage.value = error.code === 'EDIT_CONFLICT' ? error.message : '';
-    if (!Object.keys(fieldErrors.value).length && !errorMessage.value) {
+    if (!Object.keys(fieldErrors.value).length) {
       addToast(error.message, 'danger');
     }
   } finally {
@@ -155,7 +142,6 @@ async function toggleArchive() {
     const updated = await adminRepository.setEmployeeArchived(
       selected.value.id,
       archived,
-      selected.value.version,
     );
     confirmOpen.value = false;
     addToast(archived ? 'Employee archived.' : 'Employee restored.');
@@ -201,7 +187,7 @@ watch(includeArchived, applySearch);
     <SearchToolbar
       v-model="search"
       v-model:include-archived="includeArchived"
-      placeholder="Search name, title, crew, or home base"
+      placeholder="Search employee name"
       @search="applySearch"
     />
 
@@ -215,7 +201,6 @@ watch(includeArchived, applySearch);
             <thead>
               <tr>
                 <th>Employee</th>
-                <th>Crew / Home base</th>
                 <th>Latest completion</th>
                 <th>Status</th>
               </tr>
@@ -231,11 +216,6 @@ watch(includeArchived, applySearch);
               >
                 <td>
                   <strong>{{ employee.displayName }}</strong>
-                  <span>{{ employee.jobTitle }}</span>
-                </td>
-                <td>
-                  <strong>{{ employee.crew || 'Not set' }}</strong>
-                  <span>{{ employee.homeBase || 'Not set' }}</span>
                 </td>
                 <td>{{ employee.latestCompletionOn ? formatDate(employee.latestCompletionOn) : 'None' }}</td>
                 <td><ArchiveBadge :archived="Boolean(employee.archivedAt)" /></td>
@@ -253,7 +233,7 @@ watch(includeArchived, applySearch);
 
       <DetailPanel
         :title="selected?.displayName || 'Employee detail'"
-        :subtitle="selected ? selected.jobTitle : 'Select an employee to inspect their record.'"
+        :subtitle="selected ? 'Training record' : 'Select an employee to inspect their record.'"
       >
         <template v-if="selected" #actions>
           <div class="inline-actions">
@@ -266,16 +246,6 @@ watch(includeArchived, applySearch);
 
         <div v-if="detailLoading" class="loading-state">Loading employee...</div>
         <div v-else-if="selected" class="detail-stack">
-          <div class="profile-strip">
-            <div>
-              <strong>{{ selected.crew || 'No crew' }}</strong>
-              <span>Crew</span>
-            </div>
-            <div>
-              <strong>{{ selected.homeBase || 'No home base' }}</strong>
-              <span>Home base</span>
-            </div>
-          </div>
           <RouterLink
             :to="{ name: 'manage-completions', query: { action: 'create', employeeId: selected.id } }"
             class="primary-action"
@@ -292,7 +262,7 @@ watch(includeArchived, applySearch);
               >
                 <div>
                   <strong>{{ completion.course.name }}</strong>
-                  <span>{{ completion.course.code }} · Completed {{ formatDate(completion.completedOn) }}</span>
+                  <span>Completed {{ formatDate(completion.completedOn) }}</span>
                 </div>
                 <div class="requirement-status">
                   <ArchiveBadge :archived="Boolean(completion.voidedAt)" />
@@ -322,19 +292,6 @@ watch(includeArchived, applySearch);
       <span>Name</span>
       <input v-model="form.displayName" required maxlength="160" />
       <small v-if="fieldErrors.displayName" class="field-error">{{ fieldErrors.displayName[0] }}</small>
-    </label>
-    <label class="field">
-      <span>Job title</span>
-      <input v-model="form.jobTitle" required maxlength="120" />
-      <small v-if="fieldErrors.jobTitle" class="field-error">{{ fieldErrors.jobTitle[0] }}</small>
-    </label>
-    <label class="field">
-      <span>Crew</span>
-      <input v-model="form.crew" maxlength="120" />
-    </label>
-    <label class="field">
-      <span>Home base</span>
-      <input v-model="form.homeBase" maxlength="120" />
     </label>
   </FormDrawer>
 

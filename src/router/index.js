@@ -3,12 +3,10 @@ import { auth, initializeAuth, signIn } from '@/auth/auth';
 import AuthCallback from '@/views/AuthCallback.vue';
 import AuthConfiguration from '@/views/AuthConfiguration.vue';
 import Manage from '@/views/Manage.vue';
-import ManageAudit from '@/views/manage/ManageAudit.vue';
 import ManageCompletions from '@/views/manage/ManageCompletions.vue';
 import ManageCourses from '@/views/manage/ManageCourses.vue';
-import ManageCustomers from '@/views/manage/ManageCustomers.vue';
 import ManageEmployees from '@/views/manage/ManageEmployees.vue';
-import ManageOverview from '@/views/manage/ManageOverview.vue';
+import ManageSites from '@/views/manage/ManageSites.vue';
 import Training from '@/views/Training.vue';
 
 const routes = [
@@ -33,13 +31,12 @@ const routes = [
       requiresAdmin: true,
     },
     children: [
-      { path: '', name: 'manage-overview', component: ManageOverview },
+      { path: '', redirect: { name: 'manage-employees' } },
       { path: 'employees', name: 'manage-employees', component: ManageEmployees },
-      { path: 'customers', name: 'manage-customers', component: ManageCustomers },
-      { path: 'sites/:siteId', name: 'manage-site', component: ManageCustomers },
+      { path: 'sites', name: 'manage-sites', component: ManageSites },
+      { path: 'sites/:siteId', name: 'manage-site', component: ManageSites },
       { path: 'courses', name: 'manage-courses', component: ManageCourses },
       { path: 'completions', name: 'manage-completions', component: ManageCompletions },
-      { path: 'audit', name: 'manage-audit', component: ManageAudit },
     ],
   },
   {

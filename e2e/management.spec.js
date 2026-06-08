@@ -24,8 +24,6 @@ test.describe.serial('training management smoke tests', () => {
     await page.goto('/manage/employees');
     await page.getByRole('button', { name: 'Add employee' }).click();
     await page.getByLabel('Name').fill(employeeName);
-    await page.getByLabel('Job title').fill('Test Technician');
-    await page.getByLabel('Crew').fill('Test Crew');
     await page.getByRole('button', { name: 'Save' }).click();
 
     await expect(page.getByText('Employee added.')).toBeVisible();
@@ -35,44 +33,56 @@ test.describe.serial('training management smoke tests', () => {
     await expect(page.getByText('Employee archived.')).toBeVisible();
   });
 
-  test('site requirement configuration and archive safeguard', async ({ page, request }) => {
-    const customer = await create(request, '/customers', { name: unique('Customer') });
+  test('course creation owns site selection and archive preserves it', async ({ page, request }) => {
     const site = await create(request, '/sites', {
-      customerId: customer.id,
       name: unique('Site'),
-      region: 'Test Region',
       timeZone: 'America/St_Johns',
     });
-    const course = await create(request, '/courses', {
-      code: unique('PW').slice(0, 50),
-      name: unique('Requirement Course'),
-      defaultValidityMonths: 12,
-    });
+    const courseName = unique('Requirement Course');
 
-    await page.goto(`/manage/sites/${site.id}`);
-    await page.getByRole('button', { name: 'Add requirement' }).click();
-    await page.getByLabel('Course').selectOption(course.id);
-    await page.getByLabel('Effective from').fill('2026-01-01');
+    await page.goto('/manage/courses');
+    await page.getByRole('button', { name: 'Add course' }).click();
+    await page.getByLabel('Course name').fill(courseName);
+    await page.getByLabel(site.name).check();
+    await page.getByLabel('Validity in months').fill('12');
     await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByText('Site requirement added.')).toBeVisible();
+    await expect(page.getByText('Course added.')).toBeVisible();
+
+    const coursesResponse = await request.get('/api/v1/admin/courses', {
+      headers: adminHeaders,
+      params: { search: courseName },
+    });
+    const course = (await coursesResponse.json()).items[0];
+    expect(course.requirements.map((requirement) => requirement.siteId)).toContain(site.id);
+
+    await page.goto('/training');
+    await page.getByRole('combobox', { name: 'Site', exact: true }).selectOption(site.id);
+    await expect(
+      page.getByRole('combobox', { name: 'Course', exact: true }),
+    ).toContainText(courseName);
 
     await page.goto(`/manage/courses?id=${course.id}`);
     await page.getByRole('button', { name: 'Archive' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Archive' }).click();
-    await expect(
-      page.getByText('End all open site requirements before archiving the course.'),
-    ).toBeVisible();
+    await expect(page.getByText('Course archived.')).toBeVisible();
+
+    await page.goto(`/manage/sites/${site.id}`);
+    await expect(page.getByText(courseName)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Assign course' })).toHaveCount(0);
   });
 
   test('completion entry, renewal setup, and voiding', async ({ page, request }) => {
     const employee = await create(request, '/employees', {
       displayName: unique('Completion Employee'),
-      jobTitle: 'Technician',
+    });
+    const site = await create(request, '/sites', {
+      name: unique('Completion Site'),
+      timeZone: 'America/St_Johns',
     });
     const course = await create(request, '/courses', {
-      code: unique('COMP').slice(0, 50),
       name: unique('Completion Course'),
-      defaultValidityMonths: 1,
+      validityMonths: 1,
+      siteIds: [site.id],
     });
 
     await page.goto(`/manage/completions?action=create&employeeId=${employee.id}`);
@@ -101,7 +111,6 @@ test.describe.serial('training management smoke tests', () => {
       },
       data: {
         displayName: 'Viewer Cannot Create',
-        jobTitle: 'Viewer',
       },
     });
 

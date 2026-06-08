@@ -6,7 +6,7 @@ Internal training-compliance application for Northern Mining Equipment.
 
 - `src/`: Vue training and management workspaces with Cognito authentication.
 - `server/`: Fastify TypeScript API with Cognito JWT verification and Prisma.
-- `server/prisma/`: Seven-table PostgreSQL schema, custom migration, and canonical demo seed.
+- `server/prisma/`: Five-table PostgreSQL schema, custom migration, and canonical demo seed.
 - `deploy/`: Nginx and systemd templates for an EC2 deployment.
 
 The browser never connects directly to PostgreSQL. Production traffic follows:
@@ -24,8 +24,9 @@ npm install
 ```
 
 Copy `.env.example` to `.env` for the frontend and `server/.env.example` to
-`server/.env`. Development authentication defaults to an administrator. The
-Training workspace can use demo data, while Management always requires the API.
+`server/.env`. Development authentication defaults to an administrator. Both
+Training and Management use the API by default so management changes are
+immediately reflected in site readiness.
 
 Start PostgreSQL 17, apply the migration, and seed the canonical dataset:
 
@@ -40,7 +41,7 @@ Start the API and frontend in separate terminals:
 
 ```sh
 npm run dev:api
-VITE_DATA_SOURCE=api npm run dev
+npm run dev
 ```
 
 The management workspace is available at `/manage`.
