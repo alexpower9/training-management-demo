@@ -25,4 +25,10 @@ export default defineConfig({
       },
     },
   },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    restoreMocks: true,
+    include: ['src/**/*.test.js'],
+  },
 })

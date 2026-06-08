@@ -1,5 +1,6 @@
 <script setup>
 import NavBar from '@/components/NavBar.vue';
+import ToastRegion from '@/components/manage/ToastRegion.vue';
 </script>
 
 <template>
@@ -8,5 +9,6 @@ import NavBar from '@/components/NavBar.vue';
     <main class="app-main">
       <RouterView />
     </main>
+    <ToastRegion />
   </div>
 </template>

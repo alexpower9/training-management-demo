@@ -1,4 +1,3 @@
-import { getAccessToken, auth } from '@/auth/auth';
 import {
   customers,
   employees,
@@ -6,32 +5,9 @@ import {
   getDemoSiteReadiness,
   sites,
 } from '@/data/trainingDemoData';
+import { apiRequest } from '@/services/apiClient';
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 const useApi = import.meta.env.PROD || import.meta.env.VITE_DATA_SOURCE === 'api';
-
-async function apiRequest(path) {
-  const token = await getAccessToken();
-  const headers = {
-    Accept: 'application/json',
-  };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  } else if (auth.isDevelopmentAuth) {
-    headers['x-demo-user-role'] = auth.state.role || 'viewer';
-    headers['x-demo-user-subject'] = 'local-development';
-  }
-
-  const response = await fetch(`${apiBaseUrl}${path}`, { headers });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => null);
-    throw new Error(error?.message || `Request failed with status ${response.status}`);
-  }
-
-  return response.json();
-}
 
 const demoRepository = {
   async listEmployees() {
@@ -45,19 +21,21 @@ const demoRepository = {
         customer: customers.find((customer) => customer.id === site.customerId),
       }));
   },
-  async listSiteCourses(siteId) {
-    return getDemoSiteCourses(siteId);
+  async listSiteCourses(siteId, asOf) {
+    return getDemoSiteCourses(siteId, asOf);
   },
-  async getSiteReadiness(siteId) {
-    return getDemoSiteReadiness(siteId);
+  async getSiteReadiness(siteId, asOf) {
+    return getDemoSiteReadiness(siteId, asOf);
   },
 };
 
 const apiRepository = {
   listEmployees: () => apiRequest('/employees'),
   listSites: () => apiRequest('/sites'),
-  listSiteCourses: (siteId) => apiRequest(`/sites/${siteId}/courses`),
-  getSiteReadiness: (siteId) => apiRequest(`/sites/${siteId}/readiness`),
+  listSiteCourses: (siteId, asOf) =>
+    apiRequest(`/sites/${siteId}/courses`, { query: { asOf } }),
+  getSiteReadiness: (siteId, asOf) =>
+    apiRequest(`/sites/${siteId}/readiness`, { query: { asOf } }),
 };
 
 export const trainingRepository = useApi ? apiRepository : demoRepository;

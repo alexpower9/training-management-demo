@@ -32,14 +32,14 @@ test('viewer mutations are rejected before database access', async () => {
   const app = await buildApp();
   const response = await app.inject({
     method: 'POST',
-    url: '/api/v1/employees',
+    url: '/api/v1/admin/employees',
     headers: {
       'content-type': 'application/json',
       'x-demo-user-role': 'viewer',
     },
     payload: {
-      name: 'Test Employee',
-      position: 'Technician',
+      displayName: 'Test Employee',
+      jobTitle: 'Technician',
       crew: 'Field Service',
       homeBase: 'Labrador City',
     },
@@ -54,13 +54,13 @@ test('admin payload validation uses the structured error contract', async () => 
   const app = await buildApp();
   const response = await app.inject({
     method: 'POST',
-    url: '/api/v1/employees',
+    url: '/api/v1/admin/employees',
     headers: {
       'content-type': 'application/json',
       'x-demo-user-role': 'admin',
     },
     payload: {
-      name: '',
+      displayName: '',
     },
   });
 

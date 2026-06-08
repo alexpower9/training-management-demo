@@ -7,95 +7,130 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Employee {
-  id          String       @id @default(uuid())
-  name        String
-  position    String
-  crew        String
-  homeBase    String
-  active      Boolean      @default(true)
-  archivedAt  DateTime?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  completions Completion[]
+enum CompletionExpirySource {
+  MANUAL
+  CALCULATED
 
-  @@index([active, name])
+  @@map("completion_expiry_source")
+}
+
+model Employee {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayName String             @map("display_name") @db.VarChar(160)
+  jobTitle    String             @map("job_title") @db.VarChar(120)
+  crew        String?            @db.VarChar(120)
+  homeBase    String?            @map("home_base") @db.VarChar(120)
+  archivedAt  DateTime?          @map("archived_at") @db.Timestamptz(3)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version     Int                @default(1)
+  completions CourseCompletion[]
+
+  @@index([archivedAt, displayName])
+  @@map("employee")
 }
 
 model Customer {
-  id         String   @id @default(uuid())
-  name       String   @unique
-  contact    String?
-  active     Boolean  @default(true)
-  archivedAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String    @db.VarChar(160)
+  contact    String?   @db.VarChar(160)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version    Int       @default(1)
   sites      Site[]
 
-  @@index([active, name])
+  @@index([archivedAt, name])
+  @@map("customer")
 }
 
 model Site {
-  id         String   @id @default(uuid())
-  customerId String
-  name       String
-  region     String
-  active     Boolean  @default(true)
-  archivedAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  courses    Course[]
+  id           String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId   String                  @map("customer_id") @db.Uuid
+  name         String                  @db.VarChar(160)
+  region       String?                 @db.VarChar(160)
+  timeZone     String                  @default("America/St_Johns") @map("time_zone") @db.VarChar(80)
+  archivedAt   DateTime?               @map("archived_at") @db.Timestamptz(3)
+  createdAt    DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version      Int                     @default(1)
+  customer     Customer                @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  requirements SiteCourseRequirement[]
 
-  @@unique([customerId, name])
-  @@index([active, name])
+  @@index([customerId, archivedAt, name])
+  @@map("site")
 }
 
 model Course {
-  id            String       @id @default(uuid())
-  siteId        String
-  code          String
-  name          String
-  category      String
-  renewalMonths Int
-  active        Boolean      @default(true)
-  archivedAt    DateTime?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  site          Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
-  completions   Completion[]
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                  String                  @db.VarChar(50)
+  name                  String                  @db.VarChar(180)
+  category              String?                 @db.VarChar(100)
+  defaultValidityMonths Int?                    @map("default_validity_months") @db.SmallInt
+  archivedAt            DateTime?               @map("archived_at") @db.Timestamptz(3)
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version               Int                     @default(1)
+  requirements          SiteCourseRequirement[]
+  completions           CourseCompletion[]
 
-  @@unique([siteId, code])
-  @@index([siteId, active])
+  @@index([archivedAt, name])
+  @@map("course")
 }
 
-model Completion {
-  id                String    @id @default(uuid())
-  employeeId        String
-  courseId          String
-  completedOn       DateTime  @db.Date
-  expiresOn         DateTime  @db.Date
-  recordedBySubject String
-  createdAt         DateTime  @default(now())
-  voidedAt          DateTime?
-  voidedBySubject   String?
-  voidReason        String?
-  employee          Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  course            Course    @relation(fields: [courseId], references: [id], onDelete: Restrict)
+model SiteCourseRequirement {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId           String   @map("site_id") @db.Uuid
+  courseId         String   @map("course_id") @db.Uuid
+  effectiveFrom    DateTime @map("effective_from") @db.Date
+  effectiveTo      DateTime? @map("effective_to") @db.Date
+  warningDays      Int      @default(45) @map("warning_days") @db.SmallInt
+  createdBySubject String   @map("created_by_subject") @db.VarChar(255)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version          Int      @default(1)
+  site             Site     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  course           Course   @relation(fields: [courseId], references: [id], onDelete: Restrict)
 
-  @@index([employeeId, courseId, completedOn])
+  @@index([siteId, effectiveFrom, effectiveTo])
+  @@index([courseId, effectiveTo])
+  @@map("site_course_requirement")
+}
+
+model CourseCompletion {
+  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId            String                 @map("employee_id") @db.Uuid
+  courseId              String                 @map("course_id") @db.Uuid
+  completedOn           DateTime               @map("completed_on") @db.Date
+  expiresOn             DateTime               @map("expires_on") @db.Date
+  expirySource          CompletionExpirySource @map("expiry_source")
+  validityMonthsApplied Int?                   @map("validity_months_applied") @db.SmallInt
+  recordedBySubject     String                 @map("recorded_by_subject") @db.VarChar(255)
+  recordedAt            DateTime               @default(now()) @map("recorded_at") @db.Timestamptz(3)
+  voidedAt              DateTime?              @map("voided_at") @db.Timestamptz(3)
+  voidedBySubject       String?                @map("voided_by_subject") @db.VarChar(255)
+  voidReason            String?                @map("void_reason") @db.VarChar(500)
+  employee              Employee               @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  course                Course                 @relation(fields: [courseId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, courseId, completedOn, recordedAt])
   @@index([courseId, voidedAt])
+  @@map("course_completion")
 }
 
 model AuditEvent {
-  id           String   @id @default(uuid())
-  actorSubject String
-  action       String
-  entityType   String
-  entityId     String
-  details      Json?
-  createdAt    DateTime @default(now())
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorSubject String   @map("actor_subject") @db.VarChar(255)
+  actorName    String?  @map("actor_name") @db.VarChar(255)
+  action       String   @db.VarChar(100)
+  entityType   String   @map("entity_type") @db.VarChar(100)
+  entityId     String?  @map("entity_id") @db.Uuid
+  requestId    String?  @map("request_id") @db.VarChar(100)
+  beforeData   Json?    @map("before_data")
+  afterData    Json?    @map("after_data")
+  occurredAt   DateTime @default(now()) @map("occurred_at") @db.Timestamptz(3)
 
-  @@index([entityType, entityId, createdAt])
-  @@index([actorSubject, createdAt])
+  @@index([entityType, entityId, occurredAt])
+  @@index([actorSubject, occurredAt])
+  @@map("audit_event")
 }
