@@ -283,10 +283,7 @@ function expiryText(row) {
                 Eligible now. {{ selectedSummary.expiringCount }} required
                 {{ selectedSummary.expiringCount === 1 ? 'course expires' : 'courses expire' }} soon.
               </span>
-              <span v-else-if="selectedSummary.eligible">All required site courses are current.</span>
-              <span v-else>Missing or expired training must be resolved before site access.</span>
             </div>
-            <StatusBadge :status="selectedSummary.status" />
           </div>
 
           <div v-if="!selectedSummary.courses.length" class="empty-state">

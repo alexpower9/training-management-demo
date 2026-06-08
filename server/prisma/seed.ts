@@ -1,81 +1,95 @@
-import { PrismaClient } from '@prisma/client';
+import { CompletionExpirySource, PrismaClient } from '@prisma/client';
+import demoData from '../../src/data/trainingDemoData.json' with { type: 'json' };
 
 const prisma = new PrismaClient();
-
-const employees = [
-  ['Maya Chen', 'Field Technician', 'Field Service', 'Labrador City'],
-  ['Noah Bennett', 'Equipment Operator', 'Operations', 'Wabush'],
-  ['Priya Singh', 'Safety Supervisor', 'HSE', 'Labrador City'],
-  ['Logan Murphy', 'Maintenance Specialist', 'Maintenance', 'Happy Valley-Goose Bay'],
-  ['Grace Okafor', 'Site Coordinator', 'Operations', 'Labrador City'],
-  ['Ethan Ross', 'Heavy Equipment Mechanic', 'Maintenance', 'Wabush'],
-  ['Sofia Martin', 'Customer Trainer', 'Training', 'Labrador City'],
-  ['Caleb White', 'Apprentice Technician', 'Field Service', 'Labrador City'],
-] as const;
-
-const customerSites = [
-  ['Aurora Mining', 'Megan Pierce', 'North Ridge Mine', 'Labrador West', 'AUR'],
-  ['Boreal Ironworks', 'Thomas Doyle', 'Millwright Yard', 'Wabush', 'BOR'],
-  ['Tundra Resources', 'Alicia Ward', 'East Pit', 'Schefferville Corridor', 'TUN'],
-  ['Northern Aggregate', 'Graham Lee', 'Harbour Quarry', 'Happy Valley-Goose Bay', 'NOR'],
-] as const;
-
-const courseDefinitions = [
-  ['100', 'Site Orientation', 'Site Access', 12],
-  ['220', 'Lockout / Tagout', 'Safety', 24],
-  ['310', 'Site Hazard Awareness', 'Safety', 12],
-] as const;
+const requirementEffectiveFrom = new Date('2025-01-01T00:00:00.000Z');
+const recordedAt = new Date('2026-06-05T12:00:00.000Z');
 
 async function main() {
   await prisma.auditEvent.deleteMany();
-  await prisma.completion.deleteMany();
+  await prisma.courseCompletion.deleteMany();
+  await prisma.siteCourseRequirement.deleteMany();
   await prisma.course.deleteMany();
   await prisma.site.deleteMany();
   await prisma.customer.deleteMany();
   await prisma.employee.deleteMany();
 
-  const createdEmployees = [];
+  await prisma.employee.createMany({
+    data: demoData.employees.map((employee) => ({
+      id: employee.id,
+      displayName: employee.name,
+      jobTitle: employee.position,
+      crew: employee.crew,
+      homeBase: employee.homeBase,
+    })),
+  });
 
-  for (const [name, position, crew, homeBase] of employees) {
-    createdEmployees.push(
-      await prisma.employee.create({
-        data: { name, position, crew, homeBase },
-      }),
-    );
-  }
+  await prisma.customer.createMany({
+    data: demoData.customers,
+  });
 
-  for (const [customerName, contact, siteName, region, prefix] of customerSites) {
-    const customer = await prisma.customer.create({
-      data: { name: customerName, contact },
-    });
-    const site = await prisma.site.create({
-      data: { customerId: customer.id, name: siteName, region },
-    });
+  await prisma.site.createMany({
+    data: demoData.sites.map((site) => ({
+      id: site.id,
+      customerId: site.customerId,
+      name: site.name,
+      region: site.region,
+      timeZone: site.timeZone,
+    })),
+  });
 
-    for (const [suffix, name, category, renewalMonths] of courseDefinitions) {
-      const course = await prisma.course.create({
-        data: {
-          siteId: site.id,
-          code: `${prefix}-${suffix}`,
-          name: `${siteName} ${name}`,
-          category,
-          renewalMonths,
-        },
-      });
+  await prisma.course.createMany({
+    data: demoData.courses.map((course) => ({
+      id: course.id,
+      code: course.code,
+      name: course.name,
+      category: course.category,
+      defaultValidityMonths: course.defaultValidityMonths,
+    })),
+  });
 
-      for (const employee of createdEmployees) {
-        await prisma.completion.create({
-          data: {
-            employeeId: employee.id,
-            courseId: course.id,
-            completedOn: new Date('2025-01-15T00:00:00.000Z'),
-            expiresOn: new Date('2027-01-15T00:00:00.000Z'),
-            recordedBySubject: 'system-seed',
-          },
-        });
+  await prisma.siteCourseRequirement.createMany({
+    data: demoData.courses.map((course) => ({
+      siteId: course.siteId,
+      courseId: course.id,
+      effectiveFrom: requirementEffectiveFrom,
+      warningDays: 45,
+      createdBySubject: 'system-seed',
+    })),
+  });
+
+  const completionRows = demoData.employees.flatMap((employee) =>
+    demoData.courses.flatMap((course) => {
+      const key = `${employee.id}:${course.id}`;
+      const exception =
+        demoData.completionExceptions[
+          key as keyof typeof demoData.completionExceptions
+        ];
+
+      if (exception === null) {
+        return [];
       }
-    }
-  }
+
+      return [
+        {
+          employeeId: employee.id,
+          courseId: course.id,
+          completedOn: new Date(
+            `${exception?.completedOn || demoData.defaultCompletion.completedOn}T00:00:00.000Z`,
+          ),
+          expiresOn: new Date(
+            `${exception?.expiresOn || demoData.defaultCompletion.expiresOn}T00:00:00.000Z`,
+          ),
+          expirySource: CompletionExpirySource.MANUAL,
+          validityMonthsApplied: null,
+          recordedBySubject: 'system-seed',
+          recordedAt,
+        },
+      ];
+    }),
+  );
+
+  await prisma.courseCompletion.createMany({ data: completionRows });
 }
 
 main()

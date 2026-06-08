@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { AppError } from './errors.js';
+import { daysBetween, formatDateOnly, parseDateOnly, todayInTimeZone } from './dates.js';
 
 const statusRank = {
   noRequirements: -1,
@@ -9,48 +10,94 @@ const statusRank = {
   overdue: 3,
 };
 
-function dateOnly(value: Date) {
-  return value.toISOString().slice(0, 10);
+function serializeEmployee(employee: {
+  id: string;
+  displayName: string;
+  jobTitle: string;
+  crew: string | null;
+  homeBase: string | null;
+  archivedAt: Date | null;
+}) {
+  return {
+    id: employee.id,
+    name: employee.displayName,
+    position: employee.jobTitle,
+    crew: employee.crew || '',
+    homeBase: employee.homeBase || '',
+    active: !employee.archivedAt,
+  };
 }
 
-function daysUntil(value: Date) {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const target = new Date(value);
-  target.setUTCHours(0, 0, 0, 0);
-
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
+function serializeCourse(
+  course: {
+    id: string;
+    code: string;
+    name: string;
+    category: string | null;
+    defaultValidityMonths: number | null;
+    archivedAt: Date | null;
+  },
+  siteId: string,
+) {
+  return {
+    id: course.id,
+    siteId,
+    code: course.code,
+    name: course.name,
+    category: course.category || '',
+    renewalMonths: course.defaultValidityMonths,
+    defaultValidityMonths: course.defaultValidityMonths,
+    active: !course.archivedAt,
+  };
 }
 
-export async function getSiteReadiness(prisma: PrismaClient, siteId: string) {
-  const [site, employees, completions] = await Promise.all([
-    prisma.site.findFirst({
-      where: { id: siteId, active: true, customer: { active: true } },
-      include: {
-        customer: true,
-        courses: {
-          where: { active: true },
-          orderBy: { name: 'asc' },
-        },
-      },
-    }),
-    prisma.employee.findMany({
-      where: { active: true },
-      orderBy: { name: 'asc' },
-    }),
-    prisma.completion.findMany({
-      where: {
-        voidedAt: null,
-        course: { siteId, active: true },
-      },
-      orderBy: [{ completedOn: 'desc' }, { createdAt: 'desc' }],
-    }),
-  ]);
+export async function getSiteReadiness(
+  prisma: PrismaClient,
+  siteId: string,
+  requestedAsOf?: string,
+) {
+  const site = await prisma.site.findFirst({
+    where: {
+      id: siteId,
+      archivedAt: null,
+      customer: { archivedAt: null },
+    },
+    include: { customer: true },
+  });
 
   if (!site) {
     throw new AppError(404, 'SITE_NOT_FOUND', 'The requested site was not found.');
   }
 
+  const asOf = requestedAsOf || todayInTimeZone(site.timeZone);
+  const asOfDate = parseDateOnly(asOf);
+  const [requirements, employees] = await Promise.all([
+    prisma.siteCourseRequirement.findMany({
+      where: {
+        siteId,
+        effectiveFrom: { lte: asOfDate },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOfDate } }],
+        course: { archivedAt: null },
+      },
+      include: { course: true },
+      orderBy: { course: { name: 'asc' } },
+    }),
+    prisma.employee.findMany({
+      where: { archivedAt: null },
+      orderBy: { displayName: 'asc' },
+    }),
+  ]);
+  const courseIds = requirements.map((requirement) => requirement.courseId);
+  const completions = courseIds.length
+    ? await prisma.courseCompletion.findMany({
+        where: {
+          voidedAt: null,
+          completedOn: { lte: asOfDate },
+          courseId: { in: courseIds },
+        },
+        orderBy: [{ completedOn: 'desc' }, { recordedAt: 'desc' }],
+      })
+    : [];
   const latestByEmployeeCourse = new Map<string, (typeof completions)[number]>();
 
   for (const completion of completions) {
@@ -62,25 +109,37 @@ export async function getSiteReadiness(prisma: PrismaClient, siteId: string) {
 
   return employees
     .map((employee) => {
-      const courseRows = site.courses.map((course) => {
-        const completion = latestByEmployeeCourse.get(`${employee.id}:${course.id}`);
-        const remainingDays = completion ? daysUntil(completion.expiresOn) : null;
+      const courseRows = requirements.map((requirement) => {
+        const completion = latestByEmployeeCourse.get(
+          `${employee.id}:${requirement.courseId}`,
+        );
+        const expiresOn = completion ? formatDateOnly(completion.expiresOn) : null;
+        const remainingDays = expiresOn ? daysBetween(asOf, expiresOn) : null;
         let status = 'compliant';
 
         if (!completion) status = 'incomplete';
         else if (remainingDays !== null && remainingDays < 0) status = 'overdue';
-        else if (remainingDays !== null && remainingDays <= 45) status = 'expiring';
+        else if (
+          remainingDays !== null &&
+          remainingDays <= requirement.warningDays
+        ) {
+          status = 'expiring';
+        }
 
         return {
           employeeId: employee.id,
-          siteId: site.id,
-          courseId: course.id,
-          course,
+          siteId,
+          courseId: requirement.courseId,
+          requirementId: requirement.id,
+          warningDays: requirement.warningDays,
+          course: serializeCourse(requirement.course, siteId),
           completion: completion
             ? {
                 ...completion,
-                completedOn: dateOnly(completion.completedOn),
-                expiresOn: dateOnly(completion.expiresOn),
+                completedOn: formatDateOnly(completion.completedOn),
+                expiresOn,
+                recordedAt: completion.recordedAt.toISOString(),
+                voidedAt: completion.voidedAt?.toISOString() || null,
               }
             : null,
           status,
@@ -99,14 +158,20 @@ export async function getSiteReadiness(prisma: PrismaClient, siteId: string) {
 
       return {
         id: `${employee.id}-${site.id}`,
-        employee,
-        customer: site.customer,
+        employee: serializeEmployee(employee),
+        customer: {
+          id: site.customer.id,
+          name: site.customer.name,
+          contact: site.customer.contact,
+          active: !site.customer.archivedAt,
+        },
         site: {
           id: site.id,
           customerId: site.customerId,
           name: site.name,
-          region: site.region,
-          active: site.active,
+          region: site.region || '',
+          timeZone: site.timeZone,
+          active: !site.archivedAt,
         },
         courses: courseRows,
         requiredCount: courseRows.length,
@@ -118,6 +183,7 @@ export async function getSiteReadiness(prisma: PrismaClient, siteId: string) {
         eligible:
           courseRows.length > 0 &&
           courseRows.every((row) => ['compliant', 'expiring'].includes(row.status)),
+        asOf,
       };
     })
     .sort((a, b) => {

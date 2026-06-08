@@ -33,12 +33,30 @@ export function registerErrorHandler(app: FastifyInstance) {
       });
     }
 
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return reply.status(409).send({
-        code: 'CONFLICT',
-        message: 'A record with those identifying values already exists.',
-        requestId: request.id,
-      });
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        return reply.status(409).send({
+          code: 'CONFLICT',
+          message: 'A record with those identifying values already exists.',
+          requestId: request.id,
+        });
+      }
+
+      if (error.code === 'P2003') {
+        return reply.status(409).send({
+          code: 'DEPENDENCY_CONFLICT',
+          message: 'This record is still referenced by other training data.',
+          requestId: request.id,
+        });
+      }
+
+      if (error.code === 'P2004') {
+        return reply.status(409).send({
+          code: 'REQUIREMENT_OVERLAP',
+          message: 'This course already has an overlapping requirement for the site.',
+          requestId: request.id,
+        });
+      }
     }
 
     request.log.error(error);
