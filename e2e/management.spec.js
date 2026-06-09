@@ -28,6 +28,7 @@ test.describe.serial('training management smoke tests', () => {
 
     await expect(page.getByText('Employee added.')).toBeVisible();
     await page.locator('tbody').getByText(employeeName, { exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Link account' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Archive' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Archive' }).click();
     await expect(page.getByText('Employee archived.')).toBeVisible();
@@ -94,7 +95,7 @@ test.describe.serial('training management smoke tests', () => {
 
     await page.locator('tbody').getByText(employee.displayName, { exact: true }).click();
     await page.getByRole('button', { name: 'Renew' }).click();
-    await expect(page.getByLabel('Employee')).toHaveValue(employee.id);
+    await expect(page.locator('.form-drawer select').first()).toHaveValue(employee.id);
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await page.getByRole('button', { name: 'Void' }).click();
@@ -103,18 +104,36 @@ test.describe.serial('training management smoke tests', () => {
     await expect(page.getByText('Completion voided.')).toBeVisible();
   });
 
-  test('viewer access is rejected for admin mutations', async ({ request }) => {
+  test('employee access is rejected for admin mutations', async ({ request }) => {
     const response = await request.post('/api/v1/admin/employees', {
       headers: {
-        'x-demo-user-role': 'viewer',
-        'x-demo-user-subject': 'playwright-viewer',
+        'x-demo-user-role': 'employee',
+        'x-demo-user-subject': '20000000-0000-4000-8000-000000000099',
       },
       data: {
-        displayName: 'Viewer Cannot Create',
+        displayName: 'Employee Cannot Create',
       },
     });
 
     expect(response.status()).toBe(403);
     expect((await response.json()).code).toBe('FORBIDDEN');
+  });
+
+  test('administrator access is rejected for employee account linking', async ({
+    request,
+  }) => {
+    const employee = await create(request, '/employees', {
+      displayName: unique('Admin Cannot Link'),
+    });
+    const response = await request.put(
+      `/api/v1/admin/employees/${employee.id}/account`,
+      {
+        headers: adminHeaders,
+        data: { subject: crypto.randomUUID() },
+      },
+    );
+
+    expect(response.status()).toBe(403);
+    expect((await response.json()).code).toBe('OWNER_ACCESS_REQUIRED');
   });
 });

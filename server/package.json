@@ -15,6 +15,7 @@
     "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1064.0",
     "@aws-sdk/client-secrets-manager": "^3.1062.0",
     "@fastify/cors": "^11.2.0",
     "@fastify/sensible": "^6.0.4",

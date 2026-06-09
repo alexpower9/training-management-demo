@@ -6,6 +6,7 @@ import Manage from '@/views/Manage.vue';
 import ManageCompletions from '@/views/manage/ManageCompletions.vue';
 import ManageCourses from '@/views/manage/ManageCourses.vue';
 import ManageEmployees from '@/views/manage/ManageEmployees.vue';
+import ManageAdministrators from '@/views/manage/ManageAdministrators.vue';
 import ManageSites from '@/views/manage/ManageSites.vue';
 import Training from '@/views/Training.vue';
 
@@ -37,6 +38,12 @@ const routes = [
       { path: 'sites/:siteId', name: 'manage-site', component: ManageSites },
       { path: 'courses', name: 'manage-courses', component: ManageCourses },
       { path: 'completions', name: 'manage-completions', component: ManageCompletions },
+      {
+        path: 'administrators',
+        name: 'manage-administrators',
+        component: ManageAdministrators,
+        meta: { requiresOwner: true },
+      },
     ],
   },
   {
@@ -78,6 +85,10 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresAdmin && !auth.canManage.value) {
     return { name: 'training' };
+  }
+
+  if (to.meta.requiresOwner && !auth.canAdministerAccounts.value) {
+    return { name: 'manage-employees' };
   }
 
   return true;

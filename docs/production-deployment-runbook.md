@@ -73,7 +73,9 @@ npm run dev
 ```
 
 Use `/manage` with the default development administrator role. Change
-`VITE_DEMO_ROLE` to `viewer` to test authorization.
+`VITE_DEMO_ROLE` to `employee` and set `VITE_DEMO_SUBJECT` to a linked UUID to
+test employee self-service authorization. Set `VITE_DEMO_ROLE` to `owner` to
+test account linking and administrator invitations.
 
 ## 3. Recommended First Production Architecture
 
@@ -195,6 +197,9 @@ Attach an IAM role to EC2 through an instance profile. Grant only:
 
 - `secretsmanager:GetSecretValue` for the application secret;
 - `kms:Decrypt` if the secret uses a customer-managed KMS key;
+- `cognito-idp:ListUsersInGroup`, `cognito-idp:AdminCreateUser`,
+  `cognito-idp:AdminAddUserToGroup`, and `cognito-idp:AdminDeleteUser` for this
+  application's user-pool ARN;
 - Systems Manager permissions; and
 - CloudWatch log and metric permissions.
 
@@ -246,13 +251,29 @@ Recommended settings:
 
 Create these user-pool groups:
 
+- `owner`
 - `admin`
-- `viewer`
+- `employee`
 
-Add administrators to `admin`; add normal users to `viewer`. A user without
-the `admin` group is treated as a viewer by both the Vue router and the API.
+Create the initial owner manually and add only that account to `owner`. Add
+record managers to `admin` and normal users to `employee`. Accounts in none of
+these groups are rejected. Owner takes precedence over admin, which takes
+precedence over employee, if an account is temporarily present in multiple
+groups. Require MFA for the owner account and tightly restrict AWS identities
+that can change user-pool group membership.
 Fastify verifies the Cognito access-token signature, client ID, token use, and
 expiry independently.
+
+After creating an employee Cognito account, copy its immutable `sub` value and
+link it from Manage Employees while signed in as the owner. Regular
+administrators cannot view or change account links. Email and display name are
+not authorization keys. An employee cannot access training data until this
+link exists, and an archived employee remains denied until restored.
+
+The owner can invite administrators from Manage Administrators. The API uses
+its EC2 role to call Cognito, creates the user, and adds it only to the
+hardcoded `admin` group. There is no API operation that can create another
+owner.
 
 For pre-production testing, add localhost callback and sign-out URLs only to a
 separate non-production app client.
@@ -410,7 +431,7 @@ Use a staging environment first. It should have a different:
 
 Validate:
 
-1. Viewer login succeeds and `/manage` is rejected.
+1. Linked employee login succeeds, shows only that employee, and `/manage` is rejected.
 2. Administrator login succeeds.
 3. Employee create, edit, archive, and restore work.
 4. Site archive and restore preserve course assignments.
@@ -420,7 +441,7 @@ Validate:
 8. Renewal and void workflows work.
 9. Course archive and restore preserve and suspend site assignments.
 10. Expired access tokens return `401`.
-11. Viewer mutations return `403`.
+11. Employee broad-read and mutation requests return `403`.
 12. The browser never receives database credentials.
 13. RDS is not publicly reachable.
 14. The API is not reachable directly on port 3000.
@@ -482,14 +503,14 @@ Use this order:
 
 1. Run the complete stack locally.
 2. Create staging RDS and verify the migration.
-3. Create staging Cognito and test both roles.
+3. Create staging Cognito and test employee, admin, and owner roles.
 4. Deploy staging EC2, Nginx, Fastify, and Vue.
 5. Run integration and Playwright tests against staging.
 6. Add CloudWatch, alarms, backups, and restore testing.
 7. Correct the database certificate-validation launch blocker.
 8. Create production RDS, secrets, Cognito, EC2, DNS, and TLS.
 9. Apply the production migration.
-10. Create the first administrator.
+10. Create the sole owner manually, then invite the first administrator.
 11. Run the pre-launch checklist.
 12. Import or enter real data.
 13. Open access to the intended users.

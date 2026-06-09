@@ -4,12 +4,14 @@ Status: implemented for the simplified site-based workspace.
 
 ## Navigation
 
-The `/manage` workspace contains four sections:
+The `/manage` workspace contains four record-management sections:
 
 1. Employees
 2. Sites
 3. Courses
 4. Completions
+
+Owners also receive a fifth, owner-only Administrators section.
 
 `/manage` redirects to `/manage/employees`. Overview, customer, and audit-log
 screens are not part of the product.
@@ -22,6 +24,7 @@ Routes:
 /manage/sites/:siteId
 /manage/courses
 /manage/completions
+/manage/administrators
 ```
 
 Search, archive filters, pagination, and selected records are kept in route
@@ -52,15 +55,33 @@ and `PaginationControls`.
 An employee contains only:
 
 - display name
+- optional Cognito account link
 - active or archived state
 - completion history
 
-The list shows name, latest completion date, and archive state. Search is by
+The list shows name, latest completion date, account-link state, and archive state. Search is by
 name. The detail panel supports edit, archive/restore, quick completion entry,
-current training, and full completion history.
+current training, full completion history, and Cognito account linking.
+
+Account linking is separate from the basic employee form. The owner
+copies the user's Cognito `sub` into a dedicated Link or Replace action. The
+detail panel also supports unlinking. Each subject may belong to only one
+employee, and archived linked employees cannot access self-service readiness.
+Regular administrators do not receive account-link status or Cognito subjects
+and cannot call the link or unlink endpoints.
 
 Employee names are not unique. Archiving removes an employee from Training
 readiness without removing historical completions.
+
+## Administrators
+
+Only the owner can open `/manage/administrators`. The owner can list current
+members of the Cognito `admin` group and invite a new administrator by email.
+Cognito sends the temporary-password message and the API adds the new account
+to the hardcoded `admin` group.
+
+The application has no operation for creating or assigning another owner.
+Initial owner membership is managed manually in Cognito.
 
 ## Sites
 
@@ -136,6 +157,11 @@ Bulk entry, attachments, and spreadsheet import remain outside v1.
 
 The Training workspace filters directly by Site. It does not display customer,
 region, job title, crew, or home-base fields.
+
+Administrators retain the all-employee dashboard. Employee accounts receive a
+self-service dashboard containing only their own readiness across active sites.
+The self-service API derives the employee from the verified Cognito subject and
+does not accept an employee ID from the browser.
 
 For the selected active site, every active employee is displayed with:
 

@@ -36,8 +36,8 @@ export async function apiRequest(path, options = {}) {
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   } else if (auth.isDevelopmentAuth) {
-    headers['x-demo-user-role'] = auth.state.role || 'viewer';
-    headers['x-demo-user-subject'] = 'local-development';
+    headers['x-demo-user-role'] = auth.state.role || 'employee';
+    headers['x-demo-user-subject'] = auth.state.subject || 'local-development';
   }
 
   let response;

@@ -3,10 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Training from '@/views/Training.vue';
 
 const mocks = vi.hoisted(() => ({
+  authState: { role: 'admin' },
+  getMyReadiness: vi.fn(),
   listEmployees: vi.fn(),
   listSites: vi.fn(),
   listSiteCourses: vi.fn(),
   getSiteReadiness: vi.fn(),
+}));
+
+vi.mock('@/auth/auth', () => ({
+  auth: { state: mocks.authState },
 }));
 
 vi.mock('@/services/trainingRepository', () => ({
@@ -48,6 +54,7 @@ describe('Training', () => {
   ];
 
   beforeEach(() => {
+    mocks.authState.role = 'admin';
     mocks.listEmployees.mockResolvedValue(employees);
     mocks.listSites.mockResolvedValue(sites);
     mocks.listSiteCourses.mockResolvedValue([]);
@@ -78,5 +85,43 @@ describe('Training', () => {
     expect(tableText).toContain('East Pit');
     expect(tableText).toContain('Alex Power');
     expect(tableText).not.toContain('Sam Lee');
+  });
+
+  it('shows employee accounts only their selectable readiness rows', async () => {
+    mocks.authState.role = 'employee';
+    mocks.getMyReadiness.mockResolvedValue([
+      summary(employees[0], sites[0]),
+      summary(employees[0], sites[1], 'incomplete'),
+    ]);
+
+    const wrapper = mount(Training);
+    await flushPromises();
+
+    expect(mocks.listEmployees).not.toHaveBeenCalled();
+    expect(mocks.getMyReadiness).toHaveBeenCalledOnce();
+    expect(wrapper.find('select[aria-label="Employee"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('Alex Power');
+    expect(wrapper.text()).not.toContain('Sam Lee');
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2);
+
+    await wrapper.find('tbody tr').trigger('click');
+
+    expect(wrapper.text()).toContain('Alex Power at North Ridge');
+  });
+
+  it('shows a dedicated message when an employee account is not linked', async () => {
+    mocks.authState.role = 'employee';
+    mocks.getMyReadiness.mockRejectedValue({
+      code: 'EMPLOYEE_ACCOUNT_NOT_LINKED',
+      message: 'Forbidden',
+    });
+
+    const wrapper = mount(Training);
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'not linked to an employee training record',
+    );
+    expect(wrapper.text()).not.toContain('Forbidden');
   });
 });

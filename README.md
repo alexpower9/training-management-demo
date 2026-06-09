@@ -75,12 +75,31 @@ unless the configured database name is exactly `nme_training_test`.
 
 The application supports two modes:
 
-- `development`: local viewer/admin role selected with `VITE_DEMO_ROLE`.
+- `development`: local employee/admin/owner role selected with `VITE_DEMO_ROLE`.
 - `cognito`: authorization-code flow with PKCE through Amazon Cognito.
 
 Production defaults to Cognito and refuses to expose application data when Cognito settings are
-missing. Cognito groups are `viewer` and `admin`; users without the admin group are treated as
-viewers. The API independently verifies every access token and requires admin access for mutations.
+missing. Cognito groups are `employee`, `admin`, and `owner`; accounts outside all three groups are
+rejected. Owner takes precedence over admin, which takes precedence over employee. The API
+independently verifies every access token and requires admin or owner access for broad employee
+readiness, completion history, and record-management operations.
+
+Employee accounts are linked to employee records by the immutable Cognito `sub` claim. Only the
+owner maintains that link from Manage Employees and can invite new administrators. Regular
+administrators do not receive Cognito subjects or account-link state from the API. Linked active
+employees can access only
+`/api/v1/me/readiness`, which returns their own readiness across active sites. Unlinked or archived
+employee accounts are denied without receiving training data.
+
+For local employee mode, use:
+
+```dotenv
+VITE_AUTH_MODE=development
+VITE_DEMO_ROLE=employee
+VITE_DEMO_SUBJECT=20000000-0000-4000-8000-000000000001
+```
+
+The canonical development seed links that subject to the first demo employee.
 
 ## Production Build
 

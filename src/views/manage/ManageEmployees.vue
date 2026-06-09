@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { auth } from '@/auth/auth';
 import ArchiveBadge from '@/components/manage/ArchiveBadge.vue';
 import ConfirmDialog from '@/components/manage/ConfirmDialog.vue';
 import DetailPanel from '@/components/manage/DetailPanel.vue';
@@ -34,10 +35,25 @@ const form = reactive({
   displayName: '',
 });
 const initialForm = ref('');
+const accountDrawerOpen = ref(false);
+const accountSaving = ref(false);
+const accountFieldErrors = ref({});
+const accountForm = reactive({
+  subject: '',
+});
+const initialAccountForm = ref('');
+const unlinkConfirmOpen = ref(false);
+const unlinkBusy = ref(false);
 
 const formDirty = computed(() => JSON.stringify(form) !== initialForm.value);
 const drawerTitle = computed(() =>
   formMode.value === 'create' ? 'Add employee' : 'Edit employee',
+);
+const accountFormDirty = computed(
+  () => JSON.stringify(accountForm) !== initialAccountForm.value,
+);
+const accountDrawerTitle = computed(() =>
+  selected.value?.cognitoSubject ? 'Replace linked account' : 'Link employee account',
 );
 
 function setForm(values = {}) {
@@ -109,6 +125,14 @@ function openEdit() {
   drawerOpen.value = true;
 }
 
+function openAccountLink() {
+  if (!selected.value) return;
+  accountForm.subject = selected.value.cognitoSubject || '';
+  initialAccountForm.value = JSON.stringify(accountForm);
+  accountFieldErrors.value = {};
+  accountDrawerOpen.value = true;
+}
+
 async function saveEmployee() {
   saving.value = true;
   fieldErrors.value = {};
@@ -151,6 +175,45 @@ async function toggleArchive() {
     addToast(error.message, 'danger');
   } finally {
     confirmBusy.value = false;
+  }
+}
+
+async function saveAccountLink() {
+  if (!selected.value) return;
+  accountSaving.value = true;
+  accountFieldErrors.value = {};
+  try {
+    await adminRepository.linkEmployeeAccount(
+      selected.value.id,
+      accountForm.subject,
+    );
+    accountDrawerOpen.value = false;
+    addToast(selected.value.cognitoSubject ? 'Linked account replaced.' : 'Employee account linked.');
+    await loadList();
+    await selectEmployee(selected.value.id);
+  } catch (error) {
+    accountFieldErrors.value = error.fieldErrors || {};
+    if (!Object.keys(accountFieldErrors.value).length) {
+      addToast(error.message, 'danger');
+    }
+  } finally {
+    accountSaving.value = false;
+  }
+}
+
+async function unlinkAccount() {
+  if (!selected.value) return;
+  unlinkBusy.value = true;
+  try {
+    await adminRepository.unlinkEmployeeAccount(selected.value.id);
+    unlinkConfirmOpen.value = false;
+    addToast('Employee account unlinked.');
+    await loadList();
+    await selectEmployee(selected.value.id);
+  } catch (error) {
+    addToast(error.message, 'danger');
+  } finally {
+    unlinkBusy.value = false;
   }
 }
 
@@ -202,6 +265,7 @@ watch(includeArchived, applySearch);
               <tr>
                 <th>Employee</th>
                 <th>Latest completion</th>
+                <th v-if="auth.canAdministerAccounts.value">Account</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -218,6 +282,9 @@ watch(includeArchived, applySearch);
                   <strong>{{ employee.displayName }}</strong>
                 </td>
                 <td>{{ employee.latestCompletionOn ? formatDate(employee.latestCompletionOn) : 'None' }}</td>
+                <td v-if="auth.canAdministerAccounts.value">
+                  {{ employee.accountLinked ? 'Linked' : 'Unlinked' }}
+                </td>
                 <td><ArchiveBadge :archived="Boolean(employee.archivedAt)" /></td>
               </tr>
             </tbody>
@@ -246,6 +313,38 @@ watch(includeArchived, applySearch);
 
         <div v-if="detailLoading" class="loading-state">Loading employee...</div>
         <div v-else-if="selected" class="detail-stack">
+          <section
+            v-if="auth.canAdministerAccounts.value"
+            class="account-panel"
+            aria-label="Employee account"
+          >
+            <div>
+              <h3 class="detail-heading">Account</h3>
+              <strong>{{ selected.cognitoSubject ? 'Linked' : 'Unlinked' }}</strong>
+              <p v-if="selected.cognitoSubject">
+                Cognito subject: <code>{{ selected.cognitoSubject }}</code>
+              </p>
+              <p v-else>
+                Link this employee to a Cognito user before they can view their training record.
+              </p>
+              <small>
+                Copy the user subject from the Amazon Cognito user record.
+              </small>
+            </div>
+            <div class="inline-actions">
+              <button class="secondary-action" type="button" @click="openAccountLink">
+                {{ selected.cognitoSubject ? 'Replace account' : 'Link account' }}
+              </button>
+              <button
+                v-if="selected.cognitoSubject"
+                class="secondary-action"
+                type="button"
+                @click="unlinkConfirmOpen = true"
+              >
+                Unlink account
+              </button>
+            </div>
+          </section>
           <RouterLink
             :to="{ name: 'manage-completions', query: { action: 'create', employeeId: selected.id } }"
             class="primary-action"
@@ -295,6 +394,32 @@ watch(includeArchived, applySearch);
     </label>
   </FormDrawer>
 
+  <FormDrawer
+    v-if="auth.canAdministerAccounts.value"
+    :open="accountDrawerOpen"
+    :title="accountDrawerTitle"
+    :dirty="accountFormDirty"
+    :saving="accountSaving"
+    @close="accountDrawerOpen = false"
+    @save="saveAccountLink"
+  >
+    <label class="field">
+      <span>Cognito subject</span>
+      <input
+        v-model.trim="accountForm.subject"
+        required
+        autocomplete="off"
+        placeholder="00000000-0000-0000-0000-000000000000"
+      />
+      <small class="field-help">
+        Enter the UUID shown as the user's sub in Amazon Cognito.
+      </small>
+      <small v-if="accountFieldErrors.subject" class="field-error">
+        {{ accountFieldErrors.subject[0] }}
+      </small>
+    </label>
+  </FormDrawer>
+
   <ConfirmDialog
     :open="confirmOpen"
     :title="selected?.archivedAt ? 'Restore employee?' : 'Archive employee?'"
@@ -308,5 +433,17 @@ watch(includeArchived, applySearch);
     :busy="confirmBusy"
     @cancel="confirmOpen = false"
     @confirm="toggleArchive"
+  />
+
+  <ConfirmDialog
+    v-if="auth.canAdministerAccounts.value"
+    :open="unlinkConfirmOpen"
+    title="Unlink employee account?"
+    message="The employee will lose access to their training record until another Cognito account is linked."
+    confirm-label="Unlink"
+    danger
+    :busy="unlinkBusy"
+    @cancel="unlinkConfirmOpen = false"
+    @confirm="unlinkAccount"
   />
 </template>

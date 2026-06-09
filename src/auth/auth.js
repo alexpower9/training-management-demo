@@ -4,6 +4,7 @@ import { UserManager, WebStorageStateStore } from 'oidc-client-ts';
 const configuredMode = import.meta.env.VITE_AUTH_MODE;
 const authMode = import.meta.env.PROD ? 'cognito' : configuredMode || 'development';
 const isDevelopmentAuth = authMode === 'development';
+const defaultDemoEmployeeSubject = '20000000-0000-4000-8000-000000000001';
 
 const cognitoConfig = {
   authority: import.meta.env.VITE_COGNITO_AUTHORITY,
@@ -21,6 +22,7 @@ const authState = reactive({
   initialized: false,
   isAuthenticated: false,
   role: null,
+  subject: null,
   userName: null,
   configurationError: null,
 });
@@ -28,16 +30,20 @@ const authState = reactive({
 let userManager;
 let initializePromise;
 
-function getRole(profile) {
+export function getRole(profile) {
   const groups = profile?.['cognito:groups'];
   const normalizedGroups = Array.isArray(groups) ? groups : groups ? [groups] : [];
 
-  return normalizedGroups.includes('admin') ? 'admin' : 'viewer';
+  if (normalizedGroups.includes('owner')) return 'owner';
+  if (normalizedGroups.includes('admin')) return 'admin';
+  if (normalizedGroups.includes('employee')) return 'employee';
+  return null;
 }
 
 function applyUser(user) {
   authState.isAuthenticated = Boolean(user && !user.expired);
   authState.role = authState.isAuthenticated ? getRole(user.profile) : null;
+  authState.subject = authState.isAuthenticated ? user.profile?.sub || null : null;
   authState.userName = authState.isAuthenticated
     ? user.profile?.name || user.profile?.email || user.profile?.preferred_username || 'NME staff'
     : null;
@@ -80,9 +86,18 @@ export async function initializeAuth() {
 
   initializePromise = (async () => {
     if (isDevelopmentAuth) {
-      const role = import.meta.env.VITE_DEMO_ROLE === 'viewer' ? 'viewer' : 'admin';
+      const configuredRole = import.meta.env.VITE_DEMO_ROLE;
+      const role =
+        configuredRole === 'owner' || configuredRole === 'employee'
+          ? configuredRole
+          : 'admin';
       authState.isAuthenticated = true;
       authState.role = role;
+      authState.subject =
+        import.meta.env.VITE_DEMO_SUBJECT ||
+        (role === 'employee'
+          ? defaultDemoEmployeeSubject
+          : `local-development-${role}`);
       authState.userName = `Development ${role}`;
       authState.initialized = true;
       return;
@@ -142,6 +157,13 @@ export async function getAccessToken() {
 
 export const auth = {
   state: authState,
-  canManage: computed(() => authState.isAuthenticated && authState.role === 'admin'),
+  canManage: computed(
+    () =>
+      authState.isAuthenticated &&
+      (authState.role === 'owner' || authState.role === 'admin'),
+  ),
+  canAdministerAccounts: computed(
+    () => authState.isAuthenticated && authState.role === 'owner',
+  ),
   isDevelopmentAuth,
 };

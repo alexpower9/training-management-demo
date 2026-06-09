@@ -56,12 +56,16 @@ employee-requirement table is needed.
 
 - `id uuid primary key`
 - `display_name varchar(160) not null`
+- `cognito_subject varchar(255) null unique`
 - `archived_at timestamptz null`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
 
 Names are not unique because different employees may have the same name.
 Archiving removes an employee from readiness while preserving completions.
+`cognito_subject` links one Cognito account to one employee. It is nullable so
+employee records can exist before an account is provisioned. Authorization
+uses the verified Cognito `sub`, never a name or email match.
 
 ### `site`
 
@@ -197,7 +201,7 @@ role access only to the application secret.
 ## Deliberately Excluded
 
 - customers and customer contacts
-- employee job title, crew, and home base
+- employee job title, crew, home base, and email-based identity matching
 - employee-site or employee-specific requirements
 - effective-dated requirement history
 - per-requirement warning periods

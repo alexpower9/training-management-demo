@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/auth/auth', () => ({
   auth: {
     isDevelopmentAuth: true,
-    state: { role: 'admin' },
+    state: { role: 'admin', subject: 'local-development-admin' },
   },
   getAccessToken: vi.fn(async () => null),
 }));

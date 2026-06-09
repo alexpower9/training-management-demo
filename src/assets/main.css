@@ -994,6 +994,28 @@ h2 {
   font-size: 0.84rem;
 }
 
+.account-panel {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem;
+  background: var(--color-primary-soft);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.account-panel p,
+.account-panel small {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--color-muted);
+}
+
+.account-panel code {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1100px) {
   .workspace-grid {
     grid-template-columns: 1fr;
@@ -1010,6 +1032,7 @@ h2 {
   .panel-header,
   .section-heading,
   .eligibility-strip,
+  .account-panel,
   .requirement-row {
     align-items: stretch;
     flex-direction: column;

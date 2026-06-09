@@ -30,11 +30,11 @@ test(
 
     const app = await buildApp();
     const headers = {
-      'x-demo-user-role': 'admin',
-      'x-demo-user-subject': 'integration-admin',
+      'x-demo-user-role': 'owner',
+      'x-demo-user-subject': 'integration-owner',
     };
     const request = (
-      method: 'GET' | 'POST' | 'PATCH',
+      method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
       url: string,
       payload?: Record<string, unknown>,
     ) =>
@@ -54,6 +54,81 @@ test(
       });
       assert.equal(employeeResponse.statusCode, 201);
       const employee = employeeResponse.json();
+      const employeeSubject = '20000000-0000-4000-8000-000000000101';
+      const linkResponse = await request(
+        'PUT',
+        `/api/v1/admin/employees/${employee.id}/account`,
+        { subject: employeeSubject },
+      );
+      assert.equal(linkResponse.statusCode, 200);
+      assert.equal(linkResponse.json().cognitoSubject, employeeSubject);
+      const linkedListResponse = await request(
+        'GET',
+        '/api/v1/admin/employees?search=Overdue%20Employee',
+      );
+      assert.equal(linkedListResponse.statusCode, 200);
+      assert.equal(linkedListResponse.json().items[0].accountLinked, true);
+      assert.equal('cognitoSubject' in linkedListResponse.json().items[0], false);
+      const adminListResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/employees?search=Overdue%20Employee',
+        headers: {
+          'x-demo-user-role': 'admin',
+          'x-demo-user-subject': 'integration-admin',
+        },
+      });
+      assert.equal(adminListResponse.statusCode, 200);
+      assert.equal('accountLinked' in adminListResponse.json().items[0], false);
+      const adminDetailResponse = await app.inject({
+        method: 'GET',
+        url: `/api/v1/admin/employees/${employee.id}`,
+        headers: {
+          'x-demo-user-role': 'admin',
+          'x-demo-user-subject': 'integration-admin',
+        },
+      });
+      assert.equal(adminDetailResponse.statusCode, 200);
+      assert.equal('cognitoSubject' in adminDetailResponse.json(), false);
+
+      const invalidSubjectResponse = await request(
+        'PUT',
+        `/api/v1/admin/employees/${employee.id}/account`,
+        { subject: 'not-a-uuid' },
+      );
+      assert.equal(invalidSubjectResponse.statusCode, 400);
+
+      const accountEmployeeResponse = await request('POST', '/api/v1/admin/employees', {
+        displayName: 'Account Workflow Employee',
+      });
+      assert.equal(accountEmployeeResponse.statusCode, 201);
+      const accountEmployee = accountEmployeeResponse.json();
+      const duplicateLinkResponse = await request(
+        'PUT',
+        `/api/v1/admin/employees/${accountEmployee.id}/account`,
+        { subject: employeeSubject },
+      );
+      assert.equal(duplicateLinkResponse.statusCode, 409);
+      assert.equal(duplicateLinkResponse.json().code, 'COGNITO_SUBJECT_IN_USE');
+
+      const replacementSubject = '20000000-0000-4000-8000-000000000102';
+      const accountLinkResponse = await request(
+        'PUT',
+        `/api/v1/admin/employees/${accountEmployee.id}/account`,
+        { subject: replacementSubject },
+      );
+      assert.equal(accountLinkResponse.statusCode, 200);
+      const unlinkResponse = await request(
+        'DELETE',
+        `/api/v1/admin/employees/${accountEmployee.id}/account`,
+      );
+      assert.equal(unlinkResponse.statusCode, 200);
+      assert.equal(unlinkResponse.json().cognitoSubject, null);
+      await request(
+        'PUT',
+        `/api/v1/admin/employees/${accountEmployee.id}/account`,
+        { subject: replacementSubject },
+      );
+      await request('POST', `/api/v1/admin/employees/${accountEmployee.id}/archive`);
 
       const siteResponse = await request('POST', '/api/v1/admin/sites', {
         name: 'Constraint Site',
@@ -221,6 +296,8 @@ test(
       );
       assert.equal(readinessResponse.statusCode, 200);
       const readiness = readinessResponse.json();
+      assert.equal(JSON.stringify(readiness).includes('recordedBySubject'), false);
+      assert.equal(JSON.stringify(readiness).includes('voidedBySubject'), false);
       assert.deepEqual(
         readiness.map((row: { status: string }) => row.status).sort(),
         ['compliant', 'expiring', 'incomplete', 'overdue'].sort(),
@@ -232,6 +309,72 @@ test(
         ),
         false,
       );
+
+      const employeeHeaders = {
+        'x-demo-user-role': 'employee',
+        'x-demo-user-subject': employeeSubject,
+      };
+      const employeeMeResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me',
+        headers: employeeHeaders,
+      });
+      assert.equal(employeeMeResponse.statusCode, 200);
+      assert.equal(employeeMeResponse.json().role, 'employee');
+      assert.equal(employeeMeResponse.json().employee.id, employee.id);
+
+      const selfReadinessResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me/readiness?asOf=2026-06-05',
+        headers: employeeHeaders,
+      });
+      assert.equal(selfReadinessResponse.statusCode, 200);
+      const selfReadiness = selfReadinessResponse.json();
+      assert.equal(selfReadiness.length, 3);
+      assert.equal(
+        selfReadiness.every(
+          (summary: { employee: { id: string } }) => summary.employee.id === employee.id,
+        ),
+        true,
+      );
+      assert.equal(JSON.stringify(selfReadiness).includes('recordedBySubject'), false);
+      assert.equal(JSON.stringify(selfReadiness).includes('voidedBySubject'), false);
+
+      for (const url of [
+        '/api/v1/employees',
+        `/api/v1/sites/${site.id}/readiness`,
+        '/api/v1/completions',
+        '/api/v1/admin/employees',
+      ]) {
+        const response = await app.inject({
+          method: 'GET',
+          url,
+          headers: employeeHeaders,
+        });
+        assert.equal(response.statusCode, 403);
+      }
+
+      const unlinkedResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me',
+        headers: {
+          'x-demo-user-role': 'employee',
+          'x-demo-user-subject': '20000000-0000-4000-8000-000000000103',
+        },
+      });
+      assert.equal(unlinkedResponse.statusCode, 403);
+      assert.equal(unlinkedResponse.json().code, 'EMPLOYEE_ACCOUNT_NOT_LINKED');
+
+      const inactiveResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me',
+        headers: {
+          'x-demo-user-role': 'employee',
+          'x-demo-user-subject': replacementSubject,
+        },
+      });
+      assert.equal(inactiveResponse.statusCode, 403);
+      assert.equal(inactiveResponse.json().code, 'EMPLOYEE_ACCOUNT_INACTIVE');
 
       await request('POST', `/api/v1/admin/sites/${site.id}/archive`);
       const retainArchivedAssignmentResponse = await request(
@@ -319,6 +462,24 @@ test(
           .json()
           .some((row: { status: string }) => row.status !== 'noRequirements'),
         true,
+      );
+
+      await request(
+        'POST',
+        `/api/v1/admin/employees/${accountEmployee.id}/restore`,
+      );
+      const restoredEmployeeAccessResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me',
+        headers: {
+          'x-demo-user-role': 'employee',
+          'x-demo-user-subject': replacementSubject,
+        },
+      });
+      assert.equal(restoredEmployeeAccessResponse.statusCode, 200);
+      assert.equal(
+        restoredEmployeeAccessResponse.json().employee.id,
+        accountEmployee.id,
       );
 
       const employeeUpdateResponse = await request(

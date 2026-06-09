@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
+import { auth } from '@/auth/auth';
 import StatusBadge from '@/components/StatusBadge.vue';
 import {
   formatDate,
@@ -22,10 +23,12 @@ const loading = ref(false);
 const errorMessage = ref('');
 let readinessRequestId = 0;
 
+const isAdmin = computed(() => auth.state.role === 'admin');
+const isEmployee = computed(() => auth.state.role === 'employee');
 const hasSelectedSite = computed(() => selectedSiteId.value !== 'all');
 const hasSelectedEmployee = computed(() => selectedEmployeeId.value !== 'all');
 const hasSelectedScope = computed(
-  () => hasSelectedSite.value || hasSelectedEmployee.value,
+  () => isEmployee.value || hasSelectedSite.value || hasSelectedEmployee.value,
 );
 const statusOptions = computed(() =>
   Object.entries(statusMeta).map(([value, meta]) => ({
@@ -35,11 +38,18 @@ const statusOptions = computed(() =>
 );
 
 const courseScopedSummaries = computed(() => {
+  const siteScoped =
+    selectedSiteId.value === 'all'
+      ? siteSummaries.value
+      : siteSummaries.value.filter(
+          (summary) => summary.site.id === selectedSiteId.value,
+        );
+
   if (selectedCourseId.value === 'all') {
-    return siteSummaries.value;
+    return siteScoped;
   }
 
-  return siteSummaries.value
+  return siteScoped
     .map((summary) =>
       summarizeEmployeeReadiness(
         summary.employee,
@@ -70,15 +80,34 @@ const selectedSummary = computed(() => {
 });
 
 onMounted(async () => {
+  loading.value = true;
   try {
+    if (isEmployee.value) {
+      siteSummaries.value = await trainingRepository.getMyReadiness();
+      sites.value = siteSummaries.value.map((summary) => summary.site);
+      return;
+    }
+
     [employees.value, sites.value] = await Promise.all([
       trainingRepository.listEmployees(),
       trainingRepository.listSites(),
     ]);
   } catch (error) {
-    errorMessage.value = error.message;
+    errorMessage.value = accountErrorMessage(error);
+  } finally {
+    loading.value = false;
   }
 });
+
+function accountErrorMessage(error) {
+  if (error.code === 'EMPLOYEE_ACCOUNT_NOT_LINKED') {
+    return 'Your account is not linked to an employee training record. Contact an administrator.';
+  }
+  if (error.code === 'EMPLOYEE_ACCOUNT_INACTIVE') {
+    return 'Your employee training record is inactive. Contact an administrator.';
+  }
+  return error.message;
+}
 
 function prepareReadinessLoad() {
   const requestId = ++readinessRequestId;
@@ -149,6 +178,19 @@ async function loadEmployeeReadiness(employeeId) {
 }
 
 watch(selectedSiteId, (siteId) => {
+  if (isEmployee.value) {
+    selectedCourseId.value = 'all';
+    selectedSummaryId.value = null;
+    siteCourses.value =
+      siteId === 'all'
+        ? []
+        : (
+            siteSummaries.value.find((summary) => summary.site.id === siteId)
+              ?.courses || []
+          ).map((row) => row.course);
+    return;
+  }
+
   if (siteId !== 'all') {
     loadSiteReadiness(siteId);
     return;
@@ -163,6 +205,7 @@ watch(selectedSiteId, (siteId) => {
 });
 
 watch(selectedEmployeeId, (employeeId) => {
+  if (!isAdmin.value) return;
   selectedSummaryId.value = null;
 
   if (hasSelectedSite.value) return;
@@ -181,7 +224,7 @@ watch([selectedCourseId, selectedStatus], () => {
 
 function resetFilters() {
   selectedSiteId.value = 'all';
-  selectedEmployeeId.value = 'all';
+  if (isAdmin.value) selectedEmployeeId.value = 'all';
   selectedCourseId.value = 'all';
   selectedStatus.value = 'all';
   selectedSummaryId.value = null;
@@ -213,16 +256,16 @@ function expiryText(row) {
         <label class="field">
           <span>Site</span>
           <select v-model="selectedSiteId" aria-label="Site">
-            <option value="all">Select a site</option>
+            <option value="all">{{ isEmployee ? 'All sites' : 'Select a site' }}</option>
             <option v-for="site in sites" :key="site.id" :value="site.id">
               {{ site.name }}
             </option>
           </select>
         </label>
 
-        <label class="field">
+        <label v-if="isAdmin" class="field">
           <span>Employee</span>
-          <select v-model="selectedEmployeeId">
+          <select v-model="selectedEmployeeId" aria-label="Employee">
             <option value="all">All employees</option>
             <option v-for="employee in employees" :key="employee.id" :value="employee.id">
               {{ employee.name }}
@@ -269,10 +312,18 @@ function expiryText(row) {
       <section class="panel panel--large">
         <div class="panel-header">
           <div>
-            <h2>Employee site readiness</h2>
+            <h2>{{ isEmployee ? 'My site readiness' : 'Employee site readiness' }}</h2>
             <p>
               {{ filteredSummaries.length }}
-              {{ selectedCourseId === 'all' ? 'employee-site assignments' : 'employee course records' }}
+              {{
+                selectedCourseId === 'all'
+                  ? isEmployee
+                    ? 'site assignments'
+                    : 'employee-site assignments'
+                  : isEmployee
+                    ? 'course records'
+                    : 'employee course records'
+              }}
               match your filters.
             </p>
           </div>
@@ -325,7 +376,7 @@ function expiryText(row) {
       <aside class="panel detail-panel">
         <div class="panel-header">
           <div>
-            <h2>Employee detail</h2>
+            <h2>{{ isEmployee ? 'Training detail' : 'Employee detail' }}</h2>
             <p v-if="selectedSummary">
               {{ selectedSummary.employee.name }} at {{ selectedSummary.site.name }}
             </p>

@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authenticate, requireAdmin } from './auth.js';
+import { authenticate, requireAdmin, requireOwner } from './auth.js';
 import { getPrisma } from './database.js';
 import {
   addCalendarMonths,
@@ -21,6 +21,9 @@ import {
 
 const employeeInput = z.object({
   displayName: z.string().trim().min(1).max(160),
+});
+const accountInput = z.object({
+  subject: identifier.transform((subject) => subject.toLowerCase()),
 });
 const siteInput = z.object({
   name: z.string().trim().min(1).max(160),
@@ -102,6 +105,7 @@ async function validateCourseSiteSelection(
 
 export async function registerAdminRoutes(app: FastifyInstance) {
   const admin = { preHandler: [authenticate, requireAdmin] };
+  const owner = { preHandler: [authenticate, requireOwner] };
 
   app.get('/api/v1/admin/employees', admin, async (request) => {
     const query = paginationQuery(request);
@@ -130,8 +134,11 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       prisma.employee.count({ where }),
     ]);
     return pageResult(
-      items.map((item) => ({
+      items.map(({ cognitoSubject, ...item }) => ({
         ...item,
+        ...(request.auth.role === 'owner'
+          ? { accountLinked: Boolean(cognitoSubject) }
+          : {}),
         latestCompletionOn: item.completions[0]
           ? formatDateOnly(item.completions[0].completedOn)
           : null,
@@ -154,8 +161,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       },
     });
     ensureFound(employee, 'EMPLOYEE_NOT_FOUND', 'The employee was not found.');
+    const { cognitoSubject, ...publicEmployee } = employee;
     return {
-      ...employee,
+      ...publicEmployee,
+      ...(request.auth.role === 'owner' ? { cognitoSubject } : {}),
       completions: employee.completions.map(dateFields),
     };
   });
@@ -178,6 +187,64 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return prisma.employee.update({
       where: { id },
       data: employeeInput.partial().parse(request.body),
+    });
+  });
+
+  app.put('/api/v1/admin/employees/:id/account', owner, async (request) => {
+    const id = parseId(request);
+    const { subject } = accountInput.parse(request.body);
+    const prisma = await getPrisma();
+    ensureFound(
+      await prisma.employee.findUnique({ where: { id } }),
+      'EMPLOYEE_NOT_FOUND',
+      'The employee was not found.',
+    );
+
+    const existing = await prisma.employee.findUnique({
+      where: { cognitoSubject: subject },
+      select: { id: true },
+    });
+    if (existing && existing.id !== id) {
+      throw new AppError(
+        409,
+        'COGNITO_SUBJECT_IN_USE',
+        'That Cognito account is already linked to another employee.',
+        { subject: ['Enter a Cognito subject that is not already linked.'] },
+      );
+    }
+
+    try {
+      return await prisma.employee.update({
+        where: { id },
+        data: { cognitoSubject: subject },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new AppError(
+          409,
+          'COGNITO_SUBJECT_IN_USE',
+          'That Cognito account is already linked to another employee.',
+          { subject: ['Enter a Cognito subject that is not already linked.'] },
+        );
+      }
+      throw error;
+    }
+  });
+
+  app.delete('/api/v1/admin/employees/:id/account', owner, async (request) => {
+    const id = parseId(request);
+    const prisma = await getPrisma();
+    ensureFound(
+      await prisma.employee.findUnique({ where: { id } }),
+      'EMPLOYEE_NOT_FOUND',
+      'The employee was not found.',
+    );
+    return prisma.employee.update({
+      where: { id },
+      data: { cognitoSubject: null },
     });
   });
 

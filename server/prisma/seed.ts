@@ -3,6 +3,7 @@ import demoData from '../../src/data/trainingDemoData.json' with { type: 'json' 
 
 const prisma = new PrismaClient();
 const recordedAt = new Date('2026-06-05T12:00:00.000Z');
+const demoEmployeeSubject = '20000000-0000-4000-8000-000000000001';
 
 async function main() {
   await prisma.courseCompletion.deleteMany();
@@ -15,6 +16,8 @@ async function main() {
     data: demoData.employees.map((employee) => ({
       id: employee.id,
       displayName: employee.name,
+      cognitoSubject:
+        employee.id === demoData.employees[0].id ? demoEmployeeSubject : null,
     })),
   });
 

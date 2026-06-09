@@ -1,12 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authenticate } from './auth.js';
+import {
+  authenticate,
+  requireAdmin,
+  requireEmployeeAccount,
+  resolveEmployeeAccount,
+} from './auth.js';
 import { registerAdminRoutes } from './adminRoutes.js';
 import { getPrisma } from './database.js';
 import { formatDateOnly, parseDateOnly, todayInTimeZone } from './dates.js';
 import { AppError } from './errors.js';
-import { getSiteReadiness } from './readiness.js';
+import { getEmployeeReadiness, getSiteReadiness } from './readiness.js';
 import { identifier, parseId } from './routeUtils.js';
+import { registerOwnerRoutes } from './ownerRoutes.js';
 
 function publicEmployee(employee: {
   id: string;
@@ -24,13 +30,33 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get('/health', async () => ({ status: 'ok' }));
   app.get('/api/v1/health', async () => ({ status: 'ok' }));
 
-  app.get('/api/v1/me', { preHandler: authenticate }, async (request) => ({
+  app.get('/api/v1/me', { preHandler: [authenticate, resolveEmployeeAccount] }, async (request) => ({
     subject: request.auth.subject,
     role: request.auth.role,
     userName: request.auth.userName,
+    employee: request.auth.employee
+      ? {
+          id: request.auth.employee.id,
+          name: request.auth.employee.displayName,
+          active: true,
+        }
+      : null,
   }));
 
-  app.get('/api/v1/employees', { preHandler: authenticate }, async () => {
+  app.get(
+    '/api/v1/me/readiness',
+    { preHandler: [authenticate, requireEmployeeAccount] },
+    async (request) => {
+      const query = z.object({ asOf: z.string().date().optional() }).parse(request.query);
+      return getEmployeeReadiness(
+        await getPrisma(),
+        request.auth.employee!.id,
+        query.asOf,
+      );
+    },
+  );
+
+  app.get('/api/v1/employees', { preHandler: [authenticate, requireAdmin] }, async () => {
     const employees = await (await getPrisma()).employee.findMany({
       where: { archivedAt: null },
       orderBy: { displayName: 'asc' },
@@ -72,12 +98,12 @@ export async function registerRoutes(app: FastifyInstance) {
     }));
   });
 
-  app.get('/api/v1/sites/:id/readiness', { preHandler: authenticate }, async (request) => {
+  app.get('/api/v1/sites/:id/readiness', { preHandler: [authenticate, requireAdmin] }, async (request) => {
     const query = z.object({ asOf: z.string().date().optional() }).parse(request.query);
     return getSiteReadiness(await getPrisma(), parseId(request), query.asOf);
   });
 
-  app.get('/api/v1/completions', { preHandler: authenticate }, async (request) => {
+  app.get('/api/v1/completions', { preHandler: [authenticate, requireAdmin] }, async (request) => {
     const query = z
       .object({
         employeeId: identifier.optional(),
@@ -105,4 +131,5 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   await registerAdminRoutes(app);
+  await registerOwnerRoutes(app);
 }

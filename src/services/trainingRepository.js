@@ -24,6 +24,8 @@ const demoRepository = {
 };
 
 const apiRepository = {
+  getCurrentUser: () => apiRequest('/me'),
+  getMyReadiness: (asOf) => apiRequest('/me/readiness', { query: { asOf } }),
   listEmployees: () => apiRequest('/employees'),
   listSites: () => apiRequest('/sites'),
   listSiteCourses: (siteId, asOf) =>
@@ -32,4 +34,20 @@ const apiRepository = {
     apiRequest(`/sites/${siteId}/readiness`, { query: { asOf } }),
 };
 
-export const trainingRepository = useApi ? apiRepository : demoRepository;
+export const trainingRepository = useApi
+  ? apiRepository
+  : {
+      ...demoRepository,
+      async getCurrentUser() {
+        return {
+          role: 'admin',
+          employee: null,
+        };
+      },
+      async getMyReadiness(asOf) {
+        return sites
+          .filter((site) => site.active)
+          .flatMap((site) => getDemoSiteReadiness(site.id, asOf))
+          .filter((summary) => summary.employee.id === employees[0].id);
+      },
+    };

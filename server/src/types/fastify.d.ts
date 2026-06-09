@@ -4,8 +4,12 @@ declare module 'fastify' {
   interface FastifyRequest {
     auth: {
       subject: string;
-      role: 'viewer' | 'admin';
+      role: 'employee' | 'admin' | 'owner';
       userName?: string;
+      employee?: {
+        id: string;
+        displayName: string;
+      };
     };
   }
 }
