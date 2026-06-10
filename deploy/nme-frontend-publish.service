@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish NME Training frontend assets
+
+[Service]
+Type=oneshot
+User=nme-training
+Group=nme-training
+ExecStartPre=/usr/bin/test -d /opt/nme-training/dist
+ExecStart=/usr/bin/rsync -a --delete /opt/nme-training/dist/ /var/www/nme-training/dist/
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/www/nme-training

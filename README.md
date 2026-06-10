@@ -123,3 +123,24 @@ subnets and allow port 5432 only from the API instance security group.
 See [Production Deployment Runbook](docs/production-deployment-runbook.md) for
 the complete local, staging, Cognito, RDS, EC2, DNS, TLS, monitoring, backup,
 and launch sequence.
+
+## EC2 Redeployment
+
+After the initial EC2 provisioning in the production runbook, install the
+fixed-purpose systemd units and opt-in Git hooks:
+
+```sh
+npm run deploy:ec2:setup
+npm run deploy:ec2
+```
+
+Future fast-forward updates can be fetched and deployed with:
+
+```sh
+npm run deploy:ec2:update
+```
+
+The installed hooks pin the current branch as the production branch and run
+after a successful `git pull` on it or a switch back to it. Deployments require
+a clean worktree, are serialized with a lock, and record the successful commit
+in `.deployment/deployments.log`.

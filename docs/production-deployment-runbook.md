@@ -302,7 +302,7 @@ Install:
 
 ```sh
 sudo dnf update -y
-sudo dnf install -y git nginx nodejs24 nodejs24-npm certbot
+sudo dnf install -y git nginx nodejs24 nodejs24-npm certbot rsync util-linux
 sudo alternatives --set node /usr/bin/node-24
 node --version
 npm --version
@@ -313,11 +313,13 @@ Create the service account and directories:
 ```sh
 sudo useradd --system --home-dir /opt/nme-training --shell /sbin/nologin nme-training
 sudo mkdir -p /opt/nme-training /var/www/nme-training /var/www/certbot /etc/nme-training
-sudo chown -R nme-training:nme-training /opt/nme-training
+sudo chown -R "$USER":nme-training /opt/nme-training
+sudo chmod 0750 /opt/nme-training
 ```
 
 Deploy source or a CI-built artifact to `/opt/nme-training`. Production should
-use `npm ci`, never an unpinned `npm install`.
+use `npm ci`, never an unpinned `npm install`. The regular EC2 deployment user
+owns the checkout; the `nme-training` service group has read access.
 
 ## 11. Production Environment Values
 
@@ -399,7 +401,7 @@ Build the frontend and API, then publish the Vue files:
 
 ```sh
 sudo rsync -a --delete dist/ /var/www/nme-training/dist/
-sudo chown -R nginx:nginx /var/www/nme-training
+sudo chown -R nme-training:nginx /var/www/nme-training
 ```
 
 Install the provided systemd unit:
@@ -411,6 +413,66 @@ sudo systemctl enable --now nme-api
 sudo systemctl status nme-api
 curl http://127.0.0.1:3000/health
 ```
+
+### Automated redeployment
+
+The repository includes an opt-in deployment command for the single-EC2
+architecture. Run it as the regular user that owns and updates the Git
+checkout, not as root:
+
+```sh
+cd /opt/nme-training
+npm run deploy:ec2:setup
+npm run deploy:ec2
+```
+
+The setup command installs three fixed-purpose systemd units, grants the
+deployment user passwordless access only to start or restart those units, and
+sets this checkout's `core.hooksPath` to `.githooks`. The branch checked out
+during setup is stored as the only automatic deployment branch.
+
+After setup, either pull normally and let the `post-merge` hook deploy:
+
+```sh
+git pull --ff-only
+```
+
+or use the explicit update command:
+
+```sh
+npm run deploy:ec2:update
+```
+
+The deployment refuses a dirty worktree, prevents concurrent runs, installs
+from `package-lock.json`, runs tests, builds both applications, applies
+production migrations, restarts and health-checks the API, and only then
+publishes the frontend. Successful commit IDs are stored in the ignored
+`.deployment/deployments.log`.
+
+If a release changes a file under `deploy/*.service`, rerun
+`npm run deploy:ec2:setup` once so the root-owned systemd copy is refreshed.
+
+Use annotated Git tags for releases. To redeploy an earlier application
+version, first verify that its code remains compatible with all migrations
+already applied to production, then run:
+
+```sh
+NME_SKIP_AUTO_DEPLOY=1 git switch --detach RELEASE_TAG_OR_COMMIT
+NME_DEPLOY_ALLOW_REF=1 npm run deploy:ec2
+```
+
+Return to the production branch with the same guard, then deploy it:
+
+```sh
+NME_SKIP_AUTO_DEPLOY=1 git switch main
+npm run deploy:ec2
+```
+
+Set `NME_DEPLOY_FORCE=1` only when the same commit must be rebuilt, such as
+after correcting the ignored `.env.production` file. The API deployment is
+completed before frontend publication, so a failed API health check leaves the
+previous frontend in place. Database migrations are not automatically rolled
+back.
 
 Assign an Elastic IP to EC2. Create the production hostname's DNS `A` record
 pointing to that address and wait until public DNS returns the Elastic IP.
@@ -558,6 +620,5 @@ production platform is not yet complete. Before launch, complete:
 - staging;
 - CloudWatch logs and alarms;
 - tested RDS restore;
-- deployment automation or a documented manual release procedure; and
 - an explicit decision on Single-AZ versus Multi-AZ and single-EC2 versus
   load-balanced availability.

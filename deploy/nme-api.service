@@ -11,8 +11,9 @@ WorkingDirectory=/opt/nme-training/server
 Environment=NODE_ENV=production
 Environment=HOST=127.0.0.1
 Environment=PORT=3000
+Environment=PATH=/usr/local/bin:/usr/bin
 EnvironmentFile=/etc/nme-training/api.env
-ExecStart=/usr/local/bin/node dist/index.js
+ExecStart=/usr/bin/env node dist/index.js
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

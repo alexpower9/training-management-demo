@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+[[ "${NME_SKIP_AUTO_DEPLOY:-0}" == '1' ]] && exit 0
+[[ "${3:-0}" == '1' ]] || exit 0
+
+repository="$(git rev-parse --show-toplevel)"
+cd "${repository}"
+
+current_branch="$(git symbolic-ref --quiet --short HEAD || true)"
+deployment_branch="$(git config --get nme.deployBranch || printf 'main')"
+[[ "${current_branch}" == "${deployment_branch}" ]] || exit 0
+
+NME_AUTO_DEPLOY_TRIGGER=post-checkout npm run deploy:ec2

@@ -23,6 +23,10 @@
     "test:integration": "npm run test:integration --workspace server",
     "test:e2e": "npm run db:test:prepare && playwright test",
     "preview": "vite preview",
+    "deploy:ec2": "bash scripts/deploy-ec2.sh",
+    "deploy:ec2:setup": "bash scripts/setup-ec2-auto-deploy.sh",
+    "deploy:ec2:update": "NME_SKIP_AUTO_DEPLOY=1 git pull --ff-only && npm run deploy:ec2",
+    "migrate:production": "node server/scripts/migrate-production.mjs",
     "prisma:generate": "npm run prisma:generate --workspace server",
     "prisma:migrate": "npm run prisma:migrate --workspace server",
     "prisma:seed": "npm run prisma:seed --workspace server"
