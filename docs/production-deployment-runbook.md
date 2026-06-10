@@ -401,7 +401,7 @@ Build the frontend and API, then publish the Vue files:
 
 ```sh
 sudo rsync -a --delete dist/ /var/www/nme-training/dist/
-sudo chown -R nme-training:nginx /var/www/nme-training
+sudo chown -R nme-training:nme-training /var/www/nme-training
 ```
 
 Install the provided systemd unit:

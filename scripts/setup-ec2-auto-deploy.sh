@@ -52,7 +52,7 @@ for unit in nme-api.service nme-migrate.service nme-frontend-publish.service; do
     "deploy/${unit}" "/etc/systemd/system/${unit}"
 done
 
-sudo install -d -o nme-training -g nginx -m 0755 \
+sudo install -d -o nme-training -g nme-training -m 0755 \
   /var/www/nme-training /var/www/nme-training/dist
 sudo systemctl daemon-reload
 sudo systemctl enable nme-api.service
