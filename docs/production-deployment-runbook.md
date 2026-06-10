@@ -101,7 +101,7 @@ Load Balancer with an ACM certificate in front of two EC2 instances in an Auto
 Scaling group.
 
 Use one AWS Region for EC2, RDS, Cognito, Secrets Manager, and CloudWatch.
-`ca-central-1` is already the repository default.
+The current deployment uses `us-east-1`.
 
 ## 4. AWS Account And Domain Preparation
 
@@ -185,7 +185,7 @@ Create Secrets Manager secrets containing JSON with:
 {
   "username": "nme_training_app",
   "password": "generated-password",
-  "host": "database.abc123.ca-central-1.rds.amazonaws.com",
+  "host": "database.abc123.us-east-1.rds.amazonaws.com",
   "port": 5432,
   "dbname": "nme_training"
 }
@@ -212,21 +212,30 @@ credentials.
 
 ## 8. Require And Validate Database TLS
 
-RDS supports encrypted PostgreSQL connections and publishes a regional/global
-CA bundle.
+RDS supports encrypted PostgreSQL connections and publishes a regional CA
+bundle. Prisma 6 accepts invalid certificates by default unless
+`sslaccept=strict` is set, and its `sslcert` parameter reads one certificate
+rather than the complete bundle.
 
 Before launch:
 
-1. Install the current RDS CA bundle on the EC2 instance.
-2. Configure Prisma with `sslmode=require`, the RDS root certificate, and
-   strict certificate checking.
-3. Test the RDS endpoint hostname against the certificate.
-4. Document CA rotation as an operational task.
+1. In the RDS console, note the database's Certificate authority identifier,
+   normally `rds-ca-rsa2048-g1`.
+2. Install that exact root certificate from the regional bundle:
 
-The current Secrets Manager URL builder requires encryption with
-`sslmode=require`, but it does not yet supply the RDS root certificate or
-strict certificate validation. Treat this as a production launch blocker, not
-as an optional refinement.
+   ```sh
+   sudo deploy/install-rds-ca.sh us-east-1 rds-ca-rsa2048-g1
+   ```
+
+3. Set `RDS_CA_CERT_PATH` to the installed certificate path.
+4. Configure Prisma with `sslmode=require`, `sslaccept=strict`, and the
+   installed certificate. The Secrets Manager URL builder does this
+   automatically.
+5. Test the RDS endpoint hostname against the certificate.
+6. Document CA rotation as an operational task.
+
+The API refuses to start in production when `DATABASE_SECRET_ARN` is set
+without `RDS_CA_CERT_PATH`.
 
 ## 9. Configure Amazon Cognito
 
@@ -293,7 +302,7 @@ Install:
 
 ```sh
 sudo dnf update -y
-sudo dnf install -y git nginx nodejs24 nodejs24-npm
+sudo dnf install -y git nginx nodejs24 nodejs24-npm certbot
 sudo alternatives --set node /usr/bin/node-24
 node --version
 npm --version
@@ -303,7 +312,7 @@ Create the service account and directories:
 
 ```sh
 sudo useradd --system --home-dir /opt/nme-training --shell /sbin/nologin nme-training
-sudo mkdir -p /opt/nme-training /var/www/nme-training /etc/nme-training
+sudo mkdir -p /opt/nme-training /var/www/nme-training /var/www/certbot /etc/nme-training
 sudo chown -R nme-training:nme-training /opt/nme-training
 ```
 
@@ -312,22 +321,16 @@ use `npm ci`, never an unpinned `npm install`.
 
 ## 11. Production Environment Values
 
-Frontend values are compiled into the Vue bundle. Create a temporary
-`.env.production` during the build:
+Frontend values are compiled into the Vue bundle. Copy the tracked template,
+then replace every placeholder:
 
-```dotenv
-VITE_AUTH_MODE=cognito
-VITE_DATA_SOURCE=api
-VITE_API_BASE_URL=/api/v1
-VITE_COGNITO_AUTHORITY=https://cognito-idp.ca-central-1.amazonaws.com/POOL_ID
-VITE_COGNITO_CLIENT_ID=APP_CLIENT_ID
-VITE_COGNITO_DOMAIN=https://YOUR_DOMAIN.auth.ca-central-1.amazoncognito.com
-VITE_COGNITO_REDIRECT_URI=https://training.your-company-domain.com/auth/callback
-VITE_COGNITO_POST_LOGOUT_REDIRECT_URI=https://training.your-company-domain.com/training
+```sh
+cp .env.production.example .env.production
 ```
 
 These frontend values are identifiers and URLs, not secrets. Never put a
 Cognito client secret or database credential in a `VITE_*` variable.
+`.env.production` is ignored by Git.
 
 Create `/etc/nme-training/api.env`:
 
@@ -336,10 +339,14 @@ NODE_ENV=production
 HOST=127.0.0.1
 PORT=3000
 AUTH_MODE=cognito
-COGNITO_USER_POOL_ID=ca-central-1_POOL_ID
+COGNITO_USER_POOL_ID=us-east-1_POOL_ID
 COGNITO_CLIENT_ID=APP_CLIENT_ID
-DATABASE_SECRET_ARN=arn:aws:secretsmanager:ca-central-1:ACCOUNT_ID:secret:SECRET_NAME
-AWS_REGION=ca-central-1
+DATABASE_SECRET_ARN=arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:SECRET_NAME
+DATABASE_HOST=database.example.us-east-1.rds.amazonaws.com
+DATABASE_PORT=5432
+DATABASE_NAME=nme_training
+RDS_CA_CERT_PATH=/etc/pki/rds/rds-ca-rsa2048-g1.pem
+AWS_REGION=us-east-1
 ```
 
 Protect it:
@@ -358,8 +365,11 @@ npm ci
 npm run prisma:generate
 npm test
 npm run test:api
-npm run build:all
+npm run build:production
 ```
+
+`build:production` rejects development authentication, placeholder Cognito
+values, non-HTTPS redirect URLs, and mismatched callback hosts.
 
 Use `prisma migrate deploy` for production. Never run `migrate dev`,
 `migrate reset`, or the test database scripts against production.
@@ -367,7 +377,8 @@ Use `prisma migrate deploy` for production. Never run `migrate dev`,
 The Prisma CLI requires `DATABASE_URL`; it cannot use
 `DATABASE_SECRET_ARN` through the API startup helper. The deployment process
 must retrieve the migration secret into the deployment process, construct the
-TLS-validated migration URL in memory, run:
+TLS-validated migration URL in memory with `sslmode=require`,
+`sslaccept=strict`, and `sslcert=/etc/pki/rds/rds-ca-rsa2048-g1.pem`, run:
 
 ```sh
 npm run prisma:migrate
@@ -401,23 +412,44 @@ sudo systemctl status nme-api
 curl http://127.0.0.1:3000/health
 ```
 
-Replace every `training.example.com` value in
-`deploy/nme-training.nginx.conf`, then install it in the Nginx configuration.
+Assign an Elastic IP to EC2. Create the production hostname's DNS `A` record
+pointing to that address and wait until public DNS returns the Elastic IP.
+Ports 80 and 443 must be open in the EC2 security group.
 
-For the current direct-EC2 architecture, obtain and automatically renew a
-public TLS certificate for the production hostname. Test renewal before
-launch.
-
-Then:
+Replace `training.example.com` in the bootstrap configuration, install it, and
+start HTTP:
 
 ```sh
+sed 's/training\.example\.com/training.your-company-domain.com/g' \
+  deploy/nme-training.bootstrap.nginx.conf |
+  sudo tee /etc/nginx/conf.d/nme-training.conf >/dev/null
 sudo nginx -t
 sudo systemctl enable --now nginx
-sudo systemctl reload nginx
+curl http://training.your-company-domain.com/api/v1/ready
 ```
 
-Create the DNS record only after HTTPS and API health checks work against the
-instance.
+Obtain the certificate with the webroot challenge:
+
+```sh
+sudo certbot certonly --webroot \
+  --webroot-path /var/www/certbot \
+  --domain training.your-company-domain.com
+```
+
+Replace the bootstrap configuration with the HTTPS configuration:
+
+```sh
+sed 's/training\.example\.com/training.your-company-domain.com/g' \
+  deploy/nme-training.nginx.conf |
+  sudo tee /etc/nginx/conf.d/nme-training.conf >/dev/null
+sudo nginx -t
+sudo systemctl reload nginx
+curl https://training.your-company-domain.com/api/v1/ready
+sudo certbot renew --dry-run
+```
+
+Do not enable HSTS until HTTPS works on the intended hostname. The supplied
+final configuration enables it.
 
 ## 14. Pre-Launch Validation
 
@@ -507,7 +539,7 @@ Use this order:
 4. Deploy staging EC2, Nginx, Fastify, and Vue.
 5. Run integration and Playwright tests against staging.
 6. Add CloudWatch, alarms, backups, and restore testing.
-7. Correct the database certificate-validation launch blocker.
+7. Install the RDS root CA selected by the database.
 8. Create production RDS, secrets, Cognito, EC2, DNS, and TLS.
 9. Apply the production migration.
 10. Create the sole owner manually, then invite the first administrator.
@@ -521,8 +553,6 @@ Use this order:
 The application feature implementation is substantially ready, but the
 production platform is not yet complete. Before launch, complete:
 
-- Docker/PostgreSQL-backed integration and Playwright runs;
-- strict RDS CA validation;
 - a protected migration-secret workflow;
 - real Cognito and domain values;
 - staging;

@@ -1,6 +1,21 @@
 import 'dotenv/config';
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 
+type DatabaseSecret = {
+  username?: string;
+  password?: string;
+  host?: string;
+  port?: number | string;
+  dbname?: string;
+  database?: string;
+};
+
+type DatabaseLocation = {
+  host?: string;
+  port?: number | string;
+  database?: string;
+};
+
 export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   host: process.env.HOST || '127.0.0.1',
@@ -9,8 +24,66 @@ export const config = {
   cognitoUserPoolId: process.env.COGNITO_USER_POOL_ID,
   cognitoClientId: process.env.COGNITO_CLIENT_ID,
   databaseSecretArn: process.env.DATABASE_SECRET_ARN,
-  awsRegion: process.env.AWS_REGION || 'ca-central-1',
+  databaseHost: process.env.DATABASE_HOST,
+  databasePort: process.env.DATABASE_PORT,
+  databaseName: process.env.DATABASE_NAME,
+  rdsCaCertPath: process.env.RDS_CA_CERT_PATH,
+  awsRegion: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1',
 };
+
+export function buildDatabaseUrl(
+  secret: DatabaseSecret,
+  caCertPath: string,
+  location: DatabaseLocation = {},
+) {
+  const host = secret.host || location.host;
+  const port = secret.port || location.port || 5432;
+  const database = secret.dbname || secret.database || location.database;
+
+  if (!secret.username || !secret.password || !host || !database) {
+    throw new Error('Database secret must contain username, password, host, and dbname.');
+  }
+
+  if (!caCertPath) {
+    throw new Error('RDS_CA_CERT_PATH must point to the trusted RDS root CA certificate.');
+  }
+
+  const url = new URL('postgresql://placeholder');
+  url.username = secret.username;
+  url.password = secret.password;
+  url.hostname = host;
+  url.port = String(port);
+  url.pathname = database;
+  url.searchParams.set('schema', 'public');
+  url.searchParams.set('sslmode', 'require');
+  url.searchParams.set('sslaccept', 'strict');
+  url.searchParams.set('sslcert', caCertPath);
+
+  return url.toString();
+}
+
+export function validateProductionDatabaseUrl(value: string) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('DATABASE_URL must be a valid PostgreSQL URL.');
+  }
+
+  if (!['postgres:', 'postgresql:'].includes(url.protocol)) {
+    throw new Error('DATABASE_URL must use the PostgreSQL protocol.');
+  }
+
+  if (
+    url.searchParams.get('sslmode') !== 'require' ||
+    url.searchParams.get('sslaccept') !== 'strict' ||
+    !url.searchParams.get('sslcert')
+  ) {
+    throw new Error(
+      'Production DATABASE_URL must set sslmode=require, sslaccept=strict, and sslcert.',
+    );
+  }
+}
 
 export async function ensureDatabaseUrl() {
   if (process.env.DATABASE_URL) {
@@ -30,20 +103,16 @@ export async function ensureDatabaseUrl() {
     throw new Error('The configured database secret does not contain SecretString.');
   }
 
-  const secret = JSON.parse(response.SecretString);
-  const database = secret.dbname || secret.database;
-
-  if (!secret.username || !secret.password || !secret.host || !database) {
-    throw new Error('Database secret must contain username, password, host, and dbname.');
-  }
-
-  const username = encodeURIComponent(secret.username);
-  const password = encodeURIComponent(secret.password);
-  const port = secret.port || 5432;
-
-  process.env.DATABASE_URL =
-    `postgresql://${username}:${password}@${secret.host}:${port}/${database}` +
-    '?schema=public&sslmode=require';
+  const secret = JSON.parse(response.SecretString) as DatabaseSecret;
+  process.env.DATABASE_URL = buildDatabaseUrl(
+    secret,
+    config.rdsCaCertPath || '',
+    {
+      host: config.databaseHost,
+      port: config.databasePort,
+      database: config.databaseName,
+    },
+  );
 }
 
 export function validateProductionConfig() {
@@ -56,5 +125,29 @@ export function validateProductionConfig() {
     (!config.cognitoUserPoolId || !config.cognitoClientId)
   ) {
     throw new Error('COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID are required.');
+  }
+
+  if (
+    config.nodeEnv === 'production' &&
+    config.databaseSecretArn &&
+    !config.rdsCaCertPath
+  ) {
+    throw new Error(
+      'RDS_CA_CERT_PATH is required with DATABASE_SECRET_ARN in production.',
+    );
+  }
+
+  if (
+    config.nodeEnv === 'production' &&
+    config.databaseSecretArn &&
+    (!config.databaseHost || !config.databaseName)
+  ) {
+    throw new Error(
+      'DATABASE_HOST and DATABASE_NAME are required with DATABASE_SECRET_ARN in production.',
+    );
+  }
+
+  if (config.nodeEnv === 'production' && process.env.DATABASE_URL) {
+    validateProductionDatabaseUrl(process.env.DATABASE_URL);
   }
 }

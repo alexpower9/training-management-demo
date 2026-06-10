@@ -107,15 +107,18 @@ Build both applications:
 
 ```sh
 npm run prisma:generate
-npm run build:all
+cp .env.production.example .env.production
+# Replace every placeholder in .env.production.
+npm run build:production
 ```
 
-For the frontend build, set `VITE_AUTH_MODE=cognito`, `VITE_DATA_SOURCE=api`, and the Cognito
-variables documented in `.env.example`.
+The production build preflight rejects development authentication, placeholder
+Cognito values, and invalid callback URLs.
 
 The API can receive `DATABASE_URL` directly or retrieve an RDS secret using `DATABASE_SECRET_ARN`
-and the EC2 instance role. Keep RDS in private subnets and allow port 5432 only from the API
-instance security group.
+and the EC2 instance role. Secret-based production connections also require
+`RDS_CA_CERT_PATH` and use strict certificate verification. Keep RDS in private
+subnets and allow port 5432 only from the API instance security group.
 
 See [Production Deployment Runbook](docs/production-deployment-runbook.md) for
 the complete local, staging, Cognito, RDS, EC2, DNS, TLS, monitoring, backup,

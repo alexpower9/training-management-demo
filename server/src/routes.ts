@@ -29,6 +29,14 @@ function publicEmployee(employee: {
 export async function registerRoutes(app: FastifyInstance) {
   app.get('/health', async () => ({ status: 'ok' }));
   app.get('/api/v1/health', async () => ({ status: 'ok' }));
+  app.get('/ready', async () => {
+    await (await getPrisma()).$queryRaw`SELECT 1`;
+    return { status: 'ok' };
+  });
+  app.get('/api/v1/ready', async () => {
+    await (await getPrisma()).$queryRaw`SELECT 1`;
+    return { status: 'ok' };
+  });
 
   app.get('/api/v1/me', { preHandler: [authenticate, resolveEmployeeAccount] }, async (request) => ({
     subject: request.auth.subject,

@@ -15,6 +15,7 @@
     "build": "vite build",
     "build:api": "npm run build --workspace server",
     "build:all": "npm run build && npm run build:api",
+    "build:production": "node scripts/validate-production-env.mjs && npm run prisma:generate && npm run build:all",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:api": "npm run test --workspace server",

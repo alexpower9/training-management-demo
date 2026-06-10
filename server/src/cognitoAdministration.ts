@@ -200,7 +200,7 @@ export async function inviteAdminAccount(
     await client.send(
       new AdminCreateUserCommand({
         UserPoolId: poolId,
-        Username: username,
+        Username: email,
         MessageAction: 'RESEND',
         DesiredDeliveryMediums: ['EMAIL'],
       }),
