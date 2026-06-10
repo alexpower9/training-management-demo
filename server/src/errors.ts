@@ -2,6 +2,26 @@ import { Prisma } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 
+type ZodCompatibleError = {
+  name: string;
+  issues: unknown[];
+  flatten: () => {
+    fieldErrors: Record<string, string[] | undefined>;
+  };
+};
+
+function isZodError(error: unknown): error is ZodCompatibleError {
+  if (error instanceof ZodError) return true;
+  if (!error || typeof error !== 'object') return false;
+
+  const candidate = error as Partial<ZodCompatibleError>;
+  return (
+    candidate.name === 'ZodError' &&
+    Array.isArray(candidate.issues) &&
+    typeof candidate.flatten === 'function'
+  );
+}
+
 export class AppError extends Error {
   constructor(
     public statusCode: number,
@@ -24,7 +44,7 @@ export function registerErrorHandler(app: FastifyInstance) {
       });
     }
 
-    if (error instanceof ZodError) {
+    if (isZodError(error)) {
       return reply.status(400).send({
         code: 'VALIDATION_ERROR',
         message: 'The request contains invalid values.',
