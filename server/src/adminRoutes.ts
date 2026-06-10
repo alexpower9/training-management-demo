@@ -170,14 +170,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/v1/admin/employees', admin, async (request, reply) => {
+    const data = employeeInput.parse(request.body);
     const employee = await (await getPrisma()).employee.create({
-      data: employeeInput.parse(request.body),
+      data,
     });
     return reply.status(201).send(employee);
   });
 
   app.patch('/api/v1/admin/employees/:id', admin, async (request) => {
     const id = parseId(request);
+    const data = employeeInput.partial().parse(request.body);
     const prisma = await getPrisma();
     ensureFound(
       await prisma.employee.findUnique({ where: { id } }),
@@ -186,7 +188,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     );
     return prisma.employee.update({
       where: { id },
-      data: employeeInput.partial().parse(request.body),
+      data,
     });
   });
 
@@ -312,14 +314,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/v1/admin/sites', admin, async (request, reply) => {
+    const data = siteInput.parse(request.body);
     const site = await (await getPrisma()).site.create({
-      data: siteInput.parse(request.body),
+      data,
     });
     return reply.status(201).send(site);
   });
 
   app.patch('/api/v1/admin/sites/:id', admin, async (request) => {
     const id = parseId(request);
+    const data = siteInput.partial().parse(request.body);
     const prisma = await getPrisma();
     ensureFound(
       await prisma.site.findUnique({ where: { id } }),
@@ -328,7 +332,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     );
     return prisma.site.update({
       where: { id },
-      data: siteInput.partial().parse(request.body),
+      data,
     });
   });
 

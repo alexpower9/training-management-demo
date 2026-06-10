@@ -173,3 +173,23 @@ test('owner inherits administrator access', async () => {
   assert.equal(response.json().code, 'VALIDATION_ERROR');
   await app.close();
 });
+
+test('site payload validation happens before database access', async () => {
+  const app = await buildApp();
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/admin/sites',
+    headers: {
+      'content-type': 'application/json',
+      'x-demo-user-role': 'admin',
+    },
+    payload: {
+      name: '',
+      timeZone: 'invalid',
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().code, 'VALIDATION_ERROR');
+  await app.close();
+});
