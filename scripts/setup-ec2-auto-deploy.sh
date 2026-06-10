@@ -54,6 +54,8 @@ done
 
 sudo install -d -o nme-training -g nme-training -m 0755 \
   /var/www/nme-training /var/www/nme-training/dist
+sudo chown -R nme-training:nme-training /var/www/nme-training
+sudo chmod -R u+rwX,go+rX /var/www/nme-training
 sudo systemctl daemon-reload
 sudo systemctl enable nme-api.service
 

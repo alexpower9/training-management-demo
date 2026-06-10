@@ -429,7 +429,9 @@ npm run deploy:ec2
 The setup command installs three fixed-purpose systemd units, grants the
 deployment user passwordless access only to start or restart those units, and
 sets this checkout's `core.hooksPath` to `.githooks`. The branch checked out
-during setup is stored as the only automatic deployment branch.
+during setup is stored as the only automatic deployment branch. Setup also
+normalizes ownership of existing frontend assets so the publisher can replace
+files left by an earlier root-owned deployment.
 
 After setup, either pull normally and let the `post-merge` hook deploy:
 
