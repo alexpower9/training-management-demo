@@ -84,12 +84,13 @@ rejected. Owner takes precedence over admin, which takes precedence over employe
 independently verifies every access token and requires admin or owner access for broad employee
 readiness, completion history, and record-management operations.
 
-Employee accounts are linked to employee records by the immutable Cognito `sub` claim. Only the
-owner maintains that link from Manage Employees and can invite new administrators. Regular
-administrators do not receive Cognito subjects or account-link state from the API. Linked active
-employees can access only
+Adding an employee requires a display name and email. Administrators and owners create the
+employee's Cognito account, assign it only to the `employee` group, send Cognito's
+temporary-password invitation, and store the immutable Cognito `sub` on the employee record.
+Cognito subjects are never returned by employee-management API responses. The owner can also
+invite new administrators from Manage Administrators. Active employees can access only
 `/api/v1/me/readiness`, which returns their own readiness across active sites. Unlinked or archived
-employee accounts are denied without receiving training data.
+employee identities are denied without receiving training data.
 
 For local employee mode, use:
 

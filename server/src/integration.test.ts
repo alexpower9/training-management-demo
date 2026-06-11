@@ -51,24 +51,33 @@ test(
     try {
       const employeeResponse = await request('POST', '/api/v1/admin/employees', {
         displayName: 'Overdue Employee',
+        email: 'overdue.employee@example.com',
       });
       assert.equal(employeeResponse.statusCode, 201);
       const employee = employeeResponse.json();
-      const employeeSubject = '20000000-0000-4000-8000-000000000101';
-      const linkResponse = await request(
-        'PUT',
-        `/api/v1/admin/employees/${employee.id}/account`,
-        { subject: employeeSubject },
-      );
-      assert.equal(linkResponse.statusCode, 200);
-      assert.equal(linkResponse.json().cognitoSubject, employeeSubject);
+      assert.equal(employee.email, 'overdue.employee@example.com');
+      assert.equal('cognitoSubject' in employee, false);
+      const storedEmployee = await prisma.employee.findUniqueOrThrow({
+        where: { id: employee.id },
+      });
+      const employeeSubject = storedEmployee.cognitoSubject;
+
       const linkedListResponse = await request(
         'GET',
         '/api/v1/admin/employees?search=Overdue%20Employee',
       );
       assert.equal(linkedListResponse.statusCode, 200);
-      assert.equal(linkedListResponse.json().items[0].accountLinked, true);
       assert.equal('cognitoSubject' in linkedListResponse.json().items[0], false);
+      assert.equal(
+        linkedListResponse.json().items[0].email,
+        'overdue.employee@example.com',
+      );
+      const emailSearchResponse = await request(
+        'GET',
+        '/api/v1/admin/employees?search=overdue.employee%40example.com',
+      );
+      assert.equal(emailSearchResponse.json().items[0].id, employee.id);
+
       const adminListResponse = await app.inject({
         method: 'GET',
         url: '/api/v1/admin/employees?search=Overdue%20Employee',
@@ -78,7 +87,7 @@ test(
         },
       });
       assert.equal(adminListResponse.statusCode, 200);
-      assert.equal('accountLinked' in adminListResponse.json().items[0], false);
+      assert.equal('cognitoSubject' in adminListResponse.json().items[0], false);
       const adminDetailResponse = await app.inject({
         method: 'GET',
         url: `/api/v1/admin/employees/${employee.id}`,
@@ -90,45 +99,49 @@ test(
       assert.equal(adminDetailResponse.statusCode, 200);
       assert.equal('cognitoSubject' in adminDetailResponse.json(), false);
 
-      const invalidSubjectResponse = await request(
+      const removedLinkResponse = await request(
         'PUT',
         `/api/v1/admin/employees/${employee.id}/account`,
-        { subject: 'not-a-uuid' },
+        { subject: '20000000-0000-4000-8000-000000000101' },
       );
-      assert.equal(invalidSubjectResponse.statusCode, 400);
+      assert.equal(removedLinkResponse.statusCode, 404);
 
-      const accountEmployeeResponse = await request('POST', '/api/v1/admin/employees', {
-        displayName: 'Account Workflow Employee',
+      const duplicateEmailResponse = await request(
+        'POST',
+        '/api/v1/admin/employees',
+        {
+          displayName: 'Duplicate Email Employee',
+          email: 'OVERDUE.EMPLOYEE@example.com',
+        },
+      );
+      assert.equal(duplicateEmailResponse.statusCode, 409);
+      assert.equal(duplicateEmailResponse.json().code, 'EMPLOYEE_EMAIL_EXISTS');
+
+      const accountEmployeeResponse = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/employees',
+        headers: {
+          'content-type': 'application/json',
+          'x-demo-user-role': 'admin',
+          'x-demo-user-subject': 'integration-admin',
+        },
+        payload: {
+          displayName: 'Account Workflow Employee',
+          email: 'account.workflow@example.com',
+        },
       });
       assert.equal(accountEmployeeResponse.statusCode, 201);
       const accountEmployee = accountEmployeeResponse.json();
-      const duplicateLinkResponse = await request(
-        'PUT',
-        `/api/v1/admin/employees/${accountEmployee.id}/account`,
-        { subject: employeeSubject },
+      assert.equal('cognitoSubject' in accountEmployee, false);
+      const accountEmployeeRecord = await prisma.employee.findUniqueOrThrow({
+        where: { id: accountEmployee.id },
+      });
+      const accountEmployeeSubject = accountEmployeeRecord.cognitoSubject;
+      const archiveEmployeeResponse = await request(
+        'POST',
+        `/api/v1/admin/employees/${accountEmployee.id}/archive`,
       );
-      assert.equal(duplicateLinkResponse.statusCode, 409);
-      assert.equal(duplicateLinkResponse.json().code, 'COGNITO_SUBJECT_IN_USE');
-
-      const replacementSubject = '20000000-0000-4000-8000-000000000102';
-      const accountLinkResponse = await request(
-        'PUT',
-        `/api/v1/admin/employees/${accountEmployee.id}/account`,
-        { subject: replacementSubject },
-      );
-      assert.equal(accountLinkResponse.statusCode, 200);
-      const unlinkResponse = await request(
-        'DELETE',
-        `/api/v1/admin/employees/${accountEmployee.id}/account`,
-      );
-      assert.equal(unlinkResponse.statusCode, 200);
-      assert.equal(unlinkResponse.json().cognitoSubject, null);
-      await request(
-        'PUT',
-        `/api/v1/admin/employees/${accountEmployee.id}/account`,
-        { subject: replacementSubject },
-      );
-      await request('POST', `/api/v1/admin/employees/${accountEmployee.id}/archive`);
+      assert.equal('cognitoSubject' in archiveEmployeeResponse.json(), false);
 
       const siteResponse = await request('POST', '/api/v1/admin/sites', {
         name: 'Constraint Site',
@@ -222,6 +235,33 @@ test(
       assert.equal(completionResponse.json().expiresOn, '2024-02-29');
       assert.equal(completionResponse.json().validityMonthsApplied, 1);
 
+      const adminCompletionList = await request(
+        'GET',
+        `/api/v1/admin/completions?employeeId=${employee.id}`,
+      );
+      assert.equal(adminCompletionList.statusCode, 200);
+      assert.equal(
+        JSON.stringify(adminCompletionList.json()).includes('cognitoSubject'),
+        false,
+      );
+      const completionList = await request(
+        'GET',
+        `/api/v1/completions?employeeId=${employee.id}`,
+      );
+      assert.equal(completionList.statusCode, 200);
+      assert.equal(
+        JSON.stringify(completionList.json()).includes('cognitoSubject'),
+        false,
+      );
+      const courseDetailWithCompletion = await request(
+        'GET',
+        `/api/v1/admin/courses/${course.id}`,
+      );
+      assert.equal(
+        JSON.stringify(courseDetailWithCompletion.json()).includes('cognitoSubject'),
+        false,
+      );
+
       const duplicateCompletionResponse = await request(
         'POST',
         '/api/v1/admin/completions',
@@ -258,16 +298,33 @@ test(
       assert.equal(storedCompletion?.validityMonthsApplied, 1);
 
       const expiringEmployee = await prisma.employee.create({
-        data: { displayName: 'Expiring Employee' },
+        data: {
+          displayName: 'Expiring Employee',
+          email: 'expiring.employee@example.com',
+          cognitoSubject: '20000000-0000-4000-8000-000000000201',
+        },
       });
       const compliantEmployee = await prisma.employee.create({
-        data: { displayName: 'Compliant Employee' },
+        data: {
+          displayName: 'Compliant Employee',
+          email: 'compliant.employee@example.com',
+          cognitoSubject: '20000000-0000-4000-8000-000000000202',
+        },
       });
       await prisma.employee.create({
-        data: { displayName: 'Incomplete Employee' },
+        data: {
+          displayName: 'Incomplete Employee',
+          email: 'incomplete.employee@example.com',
+          cognitoSubject: '20000000-0000-4000-8000-000000000203',
+        },
       });
       await prisma.employee.create({
-        data: { displayName: 'Archived Employee', archivedAt: new Date() },
+        data: {
+          displayName: 'Archived Employee',
+          email: 'archived.employee@example.com',
+          cognitoSubject: '20000000-0000-4000-8000-000000000204',
+          archivedAt: new Date(),
+        },
       });
       await prisma.courseCompletion.createMany({
         data: [
@@ -370,7 +427,7 @@ test(
         url: '/api/v1/me',
         headers: {
           'x-demo-user-role': 'employee',
-          'x-demo-user-subject': replacementSubject,
+          'x-demo-user-subject': accountEmployeeSubject,
         },
       });
       assert.equal(inactiveResponse.statusCode, 403);
@@ -473,7 +530,7 @@ test(
         url: '/api/v1/me',
         headers: {
           'x-demo-user-role': 'employee',
-          'x-demo-user-subject': replacementSubject,
+          'x-demo-user-subject': accountEmployeeSubject,
         },
       });
       assert.equal(restoredEmployeeAccessResponse.statusCode, 200);
@@ -485,10 +542,18 @@ test(
       const employeeUpdateResponse = await request(
         'PATCH',
         `/api/v1/admin/employees/${employee.id}`,
-        { displayName: 'Updated Employee' },
+        {
+          displayName: 'Updated Employee',
+          email: 'changed.email@example.com',
+        },
       );
       assert.equal(employeeUpdateResponse.statusCode, 200);
       assert.equal(employeeUpdateResponse.json().displayName, 'Updated Employee');
+      assert.equal(
+        employeeUpdateResponse.json().email,
+        'overdue.employee@example.com',
+      );
+      assert.equal('cognitoSubject' in employeeUpdateResponse.json(), false);
 
       const voidResponse = await request(
         'POST',

@@ -30,6 +30,7 @@ test('employee mutations are rejected before database access', async () => {
     },
     payload: {
       displayName: 'Test Employee',
+      email: 'test.employee@example.com',
     },
   });
 
@@ -53,7 +54,7 @@ test('unrecognized development roles are rejected', async () => {
   await app.close();
 });
 
-test('admins cannot link employee accounts', async () => {
+test('manual employee account-link endpoints are not available', async () => {
   const app = await buildApp();
   const response = await app.inject({
     method: 'PUT',
@@ -67,8 +68,7 @@ test('admins cannot link employee accounts', async () => {
     },
   });
 
-  assert.equal(response.statusCode, 403);
-  assert.equal(response.json().code, 'OWNER_ACCESS_REQUIRED');
+  assert.equal(response.statusCode, 404);
   await app.close();
 });
 
@@ -146,6 +146,7 @@ test('admin payload validation uses the structured error contract', async () => 
     },
     payload: {
       displayName: '',
+      email: 'test.employee@example.com',
     },
   });
 
@@ -166,6 +167,7 @@ test('owner inherits administrator access', async () => {
     },
     payload: {
       displayName: '',
+      email: 'owner.employee@example.com',
     },
   });
 

@@ -5,10 +5,6 @@ const adminHeaders = {
   'x-demo-user-role': 'admin',
   'x-demo-user-subject': 'playwright-admin',
 };
-const ownerHeaders = {
-  'x-demo-user-role': 'owner',
-  'x-demo-user-subject': 'playwright-owner',
-};
 
 async function create(request, path, data) {
   const response = await request.post(`/api/v1/admin${path}`, {
@@ -24,11 +20,15 @@ test('employee sees and selects only their own training readiness', async ({
   request,
 }) => {
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-  const employee = await create(request, '/employees', {
-    displayName: `Employee Self ${suffix}`,
+  const employeeResponse = await request.get('/api/v1/admin/employees', {
+    headers: adminHeaders,
+    params: { search: 'Maya Chen' },
   });
+  expect(employeeResponse.ok()).toBeTruthy();
+  const employee = (await employeeResponse.json()).items[0];
   await create(request, '/employees', {
     displayName: `Other Employee ${suffix}`,
+    email: `other.employee.${suffix}@example.com`,
   });
   const site = await create(request, '/sites', {
     name: `Employee Site ${suffix}`,
@@ -44,15 +44,6 @@ test('employee sees and selects only their own training readiness', async ({
     courseId: course.id,
     completedOn: '2026-01-31',
   });
-  const linkResponse = await request.put(
-    `/api/v1/admin/employees/${employee.id}/account`,
-    {
-      headers: ownerHeaders,
-      data: { subject: employeeSubject },
-    },
-  );
-  expect(linkResponse.ok()).toBeTruthy();
-
   await page.goto('/training');
 
   await expect(page.getByRole('heading', { name: 'My site readiness' })).toBeVisible();

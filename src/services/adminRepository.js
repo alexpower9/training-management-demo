@@ -16,13 +16,6 @@ export const adminRepository = {
     apiRequest('/admin/employees', { method: 'POST', body }),
   updateEmployee: (id, body) =>
     apiRequest(`/admin/employees/${id}`, { method: 'PATCH', body }),
-  linkEmployeeAccount: (id, subject) =>
-    apiRequest(`/admin/employees/${id}/account`, {
-      method: 'PUT',
-      body: { subject },
-    }),
-  unlinkEmployeeAccount: (id) =>
-    apiRequest(`/admin/employees/${id}/account`, { method: 'DELETE' }),
   setEmployeeArchived: (id, archived) =>
     apiRequest(`/admin/employees/${id}/${archived ? 'archive' : 'restore'}`, {
       method: 'POST',

@@ -1,7 +1,8 @@
 import { Prisma } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authenticate, requireAdmin, requireOwner } from './auth.js';
+import { authenticate, requireAdmin } from './auth.js';
+import { provisionEmployeeAccount } from './cognitoAdministration.js';
 import { getPrisma } from './database.js';
 import {
   addCalendarMonths,
@@ -10,6 +11,7 @@ import {
   parseDateOnly,
 } from './dates.js';
 import { AppError } from './errors.js';
+import { publicEmployeeRecord } from './employeeSerialization.js';
 import {
   dateOnlyString,
   ensureFound,
@@ -19,12 +21,11 @@ import {
   parseId,
 } from './routeUtils.js';
 
-const employeeInput = z.object({
+const employeeCreateInput = z.object({
   displayName: z.string().trim().min(1).max(160),
+  email: z.string().trim().email().max(254).transform((email) => email.toLowerCase()),
 });
-const accountInput = z.object({
-  subject: identifier.transform((subject) => subject.toLowerCase()),
-});
+const employeeUpdateInput = employeeCreateInput.pick({ displayName: true });
 const siteInput = z.object({
   name: z.string().trim().min(1).max(160),
   timeZone: z
@@ -72,6 +73,15 @@ function dateFields<T extends { completedOn: Date; expiresOn: Date }>(row: T) {
   };
 }
 
+function employeeEmailExistsError() {
+  return new AppError(
+    409,
+    'EMPLOYEE_EMAIL_EXISTS',
+    'An employee already uses that email address.',
+    { email: ['Use an email address that is not already assigned to an employee.'] },
+  );
+}
+
 async function validateCourseSiteSelection(
   transaction: Prisma.TransactionClient,
   siteIds: string[],
@@ -105,7 +115,6 @@ async function validateCourseSiteSelection(
 
 export async function registerAdminRoutes(app: FastifyInstance) {
   const admin = { preHandler: [authenticate, requireAdmin] };
-  const owner = { preHandler: [authenticate, requireOwner] };
 
   app.get('/api/v1/admin/employees', admin, async (request) => {
     const query = paginationQuery(request);
@@ -113,7 +122,12 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const where: Prisma.EmployeeWhereInput = {
       ...activeFilter(query.includeArchived),
       ...(query.search
-        ? { displayName: { contains: query.search, mode: 'insensitive' } }
+        ? {
+            OR: [
+              { displayName: { contains: query.search, mode: 'insensitive' } },
+              { email: { contains: query.search, mode: 'insensitive' } },
+            ],
+          }
         : {}),
     };
     const [items, total] = await Promise.all([
@@ -134,11 +148,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       prisma.employee.count({ where }),
     ]);
     return pageResult(
-      items.map(({ cognitoSubject, ...item }) => ({
-        ...item,
-        ...(request.auth.role === 'owner'
-          ? { accountLinked: Boolean(cognitoSubject) }
-          : {}),
+      items.map((item) => ({
+        ...publicEmployeeRecord(item),
         latestCompletionOn: item.completions[0]
           ? formatDateOnly(item.completions[0].completedOn)
           : null,
@@ -161,93 +172,76 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       },
     });
     ensureFound(employee, 'EMPLOYEE_NOT_FOUND', 'The employee was not found.');
-    const { cognitoSubject, ...publicEmployee } = employee;
+    const publicRecord = publicEmployeeRecord(employee);
     return {
-      ...publicEmployee,
-      ...(request.auth.role === 'owner' ? { cognitoSubject } : {}),
+      ...publicRecord,
       completions: employee.completions.map(dateFields),
     };
   });
 
   app.post('/api/v1/admin/employees', admin, async (request, reply) => {
-    const data = employeeInput.parse(request.body);
-    const employee = await (await getPrisma()).employee.create({
-      data,
+    const data = employeeCreateInput.parse(request.body);
+    const prisma = await getPrisma();
+    const existingEmployee = await prisma.employee.findFirst({
+      where: { email: { equals: data.email, mode: 'insensitive' } },
+      select: { id: true },
     });
-    return reply.status(201).send(employee);
+    if (existingEmployee) throw employeeEmailExistsError();
+
+    const employee = await provisionEmployeeAccount(
+      data,
+      async (account, sendInvitation) =>
+        prisma.$transaction(async (transaction) => {
+          let created;
+          try {
+            created = await transaction.employee.create({
+              data: {
+                displayName: data.displayName,
+                email: data.email,
+                cognitoSubject: account.subject,
+              },
+            });
+          } catch (error) {
+            if (
+              error instanceof Prisma.PrismaClientKnownRequestError &&
+              error.code === 'P2002'
+            ) {
+              throw employeeEmailExistsError();
+            }
+            throw error;
+          }
+
+          await sendInvitation();
+          return created;
+        }),
+      (cleanupError, originalError) => {
+        request.log.error(
+          {
+            cleanupError,
+            originalError,
+            employeeEmail: data.email,
+          },
+          'Failed to remove Cognito user after employee provisioning failure.',
+        );
+      },
+    );
+
+    return reply.status(201).send(publicEmployeeRecord(employee));
   });
 
   app.patch('/api/v1/admin/employees/:id', admin, async (request) => {
     const id = parseId(request);
-    const data = employeeInput.partial().parse(request.body);
+    const data = employeeUpdateInput.partial().parse(request.body);
     const prisma = await getPrisma();
     ensureFound(
       await prisma.employee.findUnique({ where: { id } }),
       'EMPLOYEE_NOT_FOUND',
       'The employee was not found.',
     );
-    return prisma.employee.update({
+    return publicEmployeeRecord(await prisma.employee.update({
       where: { id },
       data,
-    });
-  });
-
-  app.put('/api/v1/admin/employees/:id/account', owner, async (request) => {
-    const id = parseId(request);
-    const { subject } = accountInput.parse(request.body);
-    const prisma = await getPrisma();
-    ensureFound(
-      await prisma.employee.findUnique({ where: { id } }),
-      'EMPLOYEE_NOT_FOUND',
-      'The employee was not found.',
-    );
-
-    const existing = await prisma.employee.findUnique({
-      where: { cognitoSubject: subject },
-      select: { id: true },
-    });
-    if (existing && existing.id !== id) {
-      throw new AppError(
-        409,
-        'COGNITO_SUBJECT_IN_USE',
-        'That Cognito account is already linked to another employee.',
-        { subject: ['Enter a Cognito subject that is not already linked.'] },
-      );
-    }
-
-    try {
-      return await prisma.employee.update({
-        where: { id },
-        data: { cognitoSubject: subject },
-      });
-    } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        throw new AppError(
-          409,
-          'COGNITO_SUBJECT_IN_USE',
-          'That Cognito account is already linked to another employee.',
-          { subject: ['Enter a Cognito subject that is not already linked.'] },
-        );
-      }
-      throw error;
-    }
-  });
-
-  app.delete('/api/v1/admin/employees/:id/account', owner, async (request) => {
-    const id = parseId(request);
-    const prisma = await getPrisma();
-    ensureFound(
-      await prisma.employee.findUnique({ where: { id } }),
-      'EMPLOYEE_NOT_FOUND',
-      'The employee was not found.',
-    );
-    return prisma.employee.update({
-      where: { id },
-      data: { cognitoSubject: null },
-    });
+    }));
   });
 
   for (const action of ['archive', 'restore'] as const) {
@@ -259,10 +253,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         'EMPLOYEE_NOT_FOUND',
         'The employee was not found.',
       );
-      return prisma.employee.update({
+      return publicEmployeeRecord(await prisma.employee.update({
         where: { id },
         data: { archivedAt: action === 'archive' ? new Date() : null },
-      });
+      }));
     });
   }
 
@@ -395,7 +389,12 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     ensureFound(course, 'COURSE_NOT_FOUND', 'The course was not found.');
     return {
       ...course,
-      completions: course.completions.map(dateFields),
+      completions: course.completions.map((completion) =>
+        dateFields({
+          ...completion,
+          employee: publicEmployeeRecord(completion.employee),
+        }),
+      ),
     };
   });
 
@@ -519,7 +518,17 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       }),
       prisma.courseCompletion.count({ where }),
     ]);
-    return pageResult(items.map(dateFields), total, query.page, query.pageSize);
+    return pageResult(
+      items.map((completion) =>
+        dateFields({
+          ...completion,
+          employee: publicEmployeeRecord(completion.employee),
+        }),
+      ),
+      total,
+      query.page,
+      query.pageSize,
+    );
   });
 
   app.post('/api/v1/admin/completions', admin, async (request, reply) => {
