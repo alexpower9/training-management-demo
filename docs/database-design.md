@@ -7,8 +7,9 @@ shared seed.
 
 1. Selecting any active site shows every active employee.
 2. Every course assigned to a site applies equally to every employee.
-3. Employees contain only a display name and archive state. Job title, crew,
-   home base, and external HR identifiers are outside the product.
+3. Employees contain a display name, email, Cognito subject, and archive state.
+   Job title, crew, home base, and external HR identifiers are outside the
+   product.
 4. An active course is assigned to one or many sites.
 5. One completion can satisfy the same course at every site where it is
    assigned.
@@ -56,15 +57,17 @@ employee-requirement table is needed.
 
 - `id uuid primary key`
 - `display_name varchar(160) not null`
-- `cognito_subject varchar(255) null unique`
+- `email varchar(254) not null`
+- `cognito_subject varchar(255) not null unique`
 - `archived_at timestamptz null`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
 
 Names are not unique because different employees may have the same name.
 Archiving removes an employee from readiness while preserving completions.
-`cognito_subject` links one Cognito account to one employee. It is nullable so
-employee records can exist before an account is provisioned. Authorization
+Email is unique case-insensitively and is stored for management display, not
+authorization. Every employee is created with a Cognito account, and
+`cognito_subject` links that account to exactly one employee. Authorization
 uses the verified Cognito `sub`, never a name or email match.
 
 ### `site`
@@ -173,6 +176,7 @@ The migration uses:
 - `ON DELETE RESTRICT` for business relationships
 - a partial unique index on `lower(site.name)` for active sites
 - a permanent unique index on `lower(course.name)`
+- a permanent unique index on `lower(employee.email)`
 - check constraints for completion expiry and void metadata
 - a partial duplicate-completion index for non-voided rows
 

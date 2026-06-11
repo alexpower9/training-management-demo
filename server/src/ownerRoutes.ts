@@ -19,7 +19,20 @@ export async function registerOwnerRoutes(app: FastifyInstance) {
   }));
 
   app.post('/api/v1/owner/admins', owner, async (request, reply) => {
-    const account = await inviteAdminAccount(adminInvitationInput.parse(request.body));
+    const invitation = adminInvitationInput.parse(request.body);
+    const account = await inviteAdminAccount(
+      invitation,
+      (cleanupError, originalError) => {
+        request.log.error(
+          {
+            cleanupError,
+            originalError,
+            administratorEmail: invitation.email,
+          },
+          'Failed to remove Cognito user after administrator invitation failure.',
+        );
+      },
+    );
     return reply.status(201).send(account);
   });
 }

@@ -55,23 +55,24 @@ and `PaginationControls`.
 An employee contains only:
 
 - display name
-- optional Cognito account link
+- email
+- required Cognito account identity
 - active or archived state
 - completion history
 
-The list shows name, latest completion date, account-link state, and archive state. Search is by
-name. The detail panel supports edit, archive/restore, quick completion entry,
-current training, full completion history, and Cognito account linking.
+The list shows name, email, latest completion date, and archive state. Search is
+by name or email. The detail panel supports edit, archive/restore, quick
+completion entry, current training, and full completion history.
 
-Account linking is separate from the basic employee form. The owner
-copies the user's Cognito `sub` into a dedicated Link or Replace action. The
-detail panel also supports unlinking. Each subject may belong to only one
-employee, and archived linked employees cannot access self-service readiness.
-Regular administrators do not receive account-link status or Cognito subjects
-and cannot call the link or unlink endpoints.
+Adding an employee requires name and email for administrators and owners. The
+API creates the Cognito user with invitation delivery initially suppressed,
+adds the account only to the `employee` group, stores its immutable `sub`, and
+then sends Cognito's temporary-password invitation. A failure removes both the
+employee row and newly created Cognito user. Email and Cognito subject are
+immutable after creation, and the subject is never returned by the API.
 
 Employee names are not unique. Archiving removes an employee from Training
-readiness without removing historical completions.
+readiness without removing historical completions or deleting the Cognito user.
 
 ## Administrators
 
@@ -190,7 +191,7 @@ There are no optimistic concurrency version fields or edit-conflict flows.
 
 | Entity | Create | Update | Lifecycle action | Delete |
 | --- | --- | --- | --- | --- |
-| Employee | Yes | Name | Archive/restore | No |
+| Employee | Yes, with Cognito invitation | Name | Archive/restore | No |
 | Site | Yes | Name/time zone | Archive/restore | No |
 | Course | Yes | Name/validity/sites | Archive/restore | No |
 | Site assignment | Through course | Through course | Preserved on archive | No |

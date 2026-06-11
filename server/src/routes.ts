@@ -9,6 +9,7 @@ import {
 import { registerAdminRoutes } from './adminRoutes.js';
 import { getPrisma } from './database.js';
 import { formatDateOnly, parseDateOnly, todayInTimeZone } from './dates.js';
+import { publicEmployeeRecord } from './employeeSerialization.js';
 import { AppError } from './errors.js';
 import { getEmployeeReadiness, getSiteReadiness } from './readiness.js';
 import { identifier, parseId } from './routeUtils.js';
@@ -131,6 +132,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
     return rows.map((row) => ({
       ...row,
+      employee: publicEmployeeRecord(row.employee),
       completedOn: formatDateOnly(row.completedOn),
       expiresOn: formatDateOnly(row.expiresOn),
       recordedAt: row.recordedAt.toISOString(),

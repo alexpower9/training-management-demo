@@ -3,8 +3,6 @@ import demoData from '../../src/data/trainingDemoData.json' with { type: 'json' 
 
 const prisma = new PrismaClient();
 const recordedAt = new Date('2026-06-05T12:00:00.000Z');
-const demoEmployeeSubject = '20000000-0000-4000-8000-000000000001';
-
 async function main() {
   await prisma.courseCompletion.deleteMany();
   await prisma.siteCourseRequirement.deleteMany();
@@ -13,11 +11,11 @@ async function main() {
   await prisma.employee.deleteMany();
 
   await prisma.employee.createMany({
-    data: demoData.employees.map((employee) => ({
+    data: demoData.employees.map((employee, index) => ({
       id: employee.id,
       displayName: employee.name,
-      cognitoSubject:
-        employee.id === demoData.employees[0].id ? demoEmployeeSubject : null,
+      email: employee.email,
+      cognitoSubject: `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
     })),
   });
 

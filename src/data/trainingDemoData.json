@@ -7,35 +7,43 @@
   "employees": [
     {
       "id": "10000000-0000-4000-8000-000000000001",
-      "name": "Maya Chen"
+      "name": "Maya Chen",
+      "email": "maya.chen@example.com"
     },
     {
       "id": "10000000-0000-4000-8000-000000000002",
-      "name": "Noah Bennett"
+      "name": "Noah Bennett",
+      "email": "noah.bennett@example.com"
     },
     {
       "id": "10000000-0000-4000-8000-000000000003",
-      "name": "Priya Singh"
+      "name": "Priya Singh",
+      "email": "priya.singh@example.com"
     },
     {
       "id": "10000000-0000-4000-8000-000000000004",
-      "name": "Logan Murphy"
+      "name": "Logan Murphy",
+      "email": "logan.murphy@example.com"
     },
     {
       "id": "10000000-0000-4000-8000-000000000005",
-      "name": "Grace Okafor"
+      "name": "Grace Okafor",
+      "email": "grace.okafor@example.com"
     },
     {
       "id": "10000000-0000-4000-8000-000000000006",
-      "name": "Ethan Ross"
+      "name": "Ethan Ross",
+      "email": "ethan.ross@example.com"
     },
     {
       "id": "10000000-0000-4000-8000-000000000007",
-      "name": "Sofia Martin"
+      "name": "Sofia Martin",
+      "email": "sofia.martin@example.com"
     },
     {
       "id": "10000000-0000-4000-8000-000000000008",
-      "name": "Caleb White"
+      "name": "Caleb White",
+      "email": "caleb.white@example.com"
     }
   ],
   "sites": [

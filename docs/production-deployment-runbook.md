@@ -74,8 +74,9 @@ npm run dev
 
 Use `/manage` with the default development administrator role. Change
 `VITE_DEMO_ROLE` to `employee` and set `VITE_DEMO_SUBJECT` to a linked UUID to
-test employee self-service authorization. Set `VITE_DEMO_ROLE` to `owner` to
-test account linking and administrator invitations.
+test employee self-service authorization. Use either the administrator or
+owner role to test employee invitations, and use the owner role to test
+administrator invitations.
 
 ## 3. Recommended First Production Architecture
 
@@ -273,16 +274,31 @@ that can change user-pool group membership.
 Fastify verifies the Cognito access-token signature, client ID, token use, and
 expiry independently.
 
-After creating an employee Cognito account, copy its immutable `sub` value and
-link it from Manage Employees while signed in as the owner. Regular
-administrators cannot view or change account links. Email and display name are
-not authorization keys. An employee cannot access training data until this
-link exists, and an archived employee remains denied until restored.
+Administrators and owners add employees from Manage Employees with a display
+name and email. The API creates the Cognito user with delivery suppressed, adds
+it only to the `employee` group, stores its immutable `sub`, and then requests
+the standard temporary-password email. Email and display name are not
+authorization keys, and Cognito subjects are never returned by management API
+responses. An archived employee remains denied until restored.
 
 The owner can invite administrators from Manage Administrators. The API uses
 its EC2 role to call Cognito, creates the user, and adds it only to the
 hardcoded `admin` group. There is no API operation that can create another
 owner.
+
+Configure the Cognito user-pool invitation message template before launch. The
+message must retain both Cognito placeholders:
+
+```text
+Your NME Training account is ready.
+Sign in at https://training.your-company-domain.com/training
+Username: {username}
+Temporary password: {####}
+```
+
+Cognito rejects an invitation template that omits `{####}`. Keep the
+application sign-in URL environment-specific and verify delivery in staging
+for both employee and administrator invitations.
 
 For pre-production testing, add localhost callback and sign-out URLs only to a
 separate non-production app client.

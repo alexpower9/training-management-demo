@@ -1,7 +1,9 @@
-import { getTestEnvironment, resetTestDatabase } from './test-database.mjs';
+import { getTestEnvironment, resetTestDatabase, run } from './test-database.mjs';
 
 try {
-  resetTestDatabase(getTestEnvironment());
+  const environment = getTestEnvironment();
+  resetTestDatabase(environment);
+  run('npm', ['exec', 'tsx', '--', 'prisma/seed.ts'], environment);
 } catch (error) {
   console.error(error.message);
   process.exit(1);

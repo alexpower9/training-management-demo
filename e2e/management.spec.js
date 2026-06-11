@@ -21,14 +21,16 @@ async function create(request, path, data) {
 test.describe.serial('training management smoke tests', () => {
   test('employee CRUD and archive workflow', async ({ page }) => {
     const employeeName = unique('Playwright Employee');
+    const employeeEmail = `${unique('playwright-employee')}@example.com`;
     await page.goto('/manage/employees');
     await page.getByRole('button', { name: 'Add employee' }).click();
     await page.getByLabel('Name').fill(employeeName);
+    await page.getByLabel('Email').fill(employeeEmail);
     await page.getByRole('button', { name: 'Save' }).click();
 
-    await expect(page.getByText('Employee added.')).toBeVisible();
+    await expect(page.getByText('Employee added and invitation sent.')).toBeVisible();
+    await expect(page.getByText(employeeEmail, { exact: true }).first()).toBeVisible();
     await page.locator('tbody').getByText(employeeName, { exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Link account' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Archive' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Archive' }).click();
     await expect(page.getByText('Employee archived.')).toBeVisible();
@@ -75,6 +77,7 @@ test.describe.serial('training management smoke tests', () => {
   test('completion entry, renewal setup, and voiding', async ({ page, request }) => {
     const employee = await create(request, '/employees', {
       displayName: unique('Completion Employee'),
+      email: `${unique('completion-employee')}@example.com`,
     });
     const site = await create(request, '/sites', {
       name: unique('Completion Site'),
@@ -112,6 +115,7 @@ test.describe.serial('training management smoke tests', () => {
       },
       data: {
         displayName: 'Employee Cannot Create',
+        email: 'cannot.create@example.com',
       },
     });
 
@@ -119,11 +123,10 @@ test.describe.serial('training management smoke tests', () => {
     expect((await response.json()).code).toBe('FORBIDDEN');
   });
 
-  test('administrator access is rejected for employee account linking', async ({
-    request,
-  }) => {
+  test('manual employee account linking is no longer available', async ({ request }) => {
     const employee = await create(request, '/employees', {
       displayName: unique('Admin Cannot Link'),
+      email: `${unique('admin-cannot-link')}@example.com`,
     });
     const response = await request.put(
       `/api/v1/admin/employees/${employee.id}/account`,
@@ -133,7 +136,6 @@ test.describe.serial('training management smoke tests', () => {
       },
     );
 
-    expect(response.status()).toBe(403);
-    expect((await response.json()).code).toBe('OWNER_ACCESS_REQUIRED');
+    expect(response.status()).toBe(404);
   });
 });

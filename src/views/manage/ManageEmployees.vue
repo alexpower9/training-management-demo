@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { auth } from '@/auth/auth';
 import ArchiveBadge from '@/components/manage/ArchiveBadge.vue';
 import ConfirmDialog from '@/components/manage/ConfirmDialog.vue';
 import DetailPanel from '@/components/manage/DetailPanel.vue';
@@ -33,32 +32,19 @@ const confirmOpen = ref(false);
 const confirmBusy = ref(false);
 const form = reactive({
   displayName: '',
+  email: '',
 });
 const initialForm = ref('');
-const accountDrawerOpen = ref(false);
-const accountSaving = ref(false);
-const accountFieldErrors = ref({});
-const accountForm = reactive({
-  subject: '',
-});
-const initialAccountForm = ref('');
-const unlinkConfirmOpen = ref(false);
-const unlinkBusy = ref(false);
 
 const formDirty = computed(() => JSON.stringify(form) !== initialForm.value);
 const drawerTitle = computed(() =>
   formMode.value === 'create' ? 'Add employee' : 'Edit employee',
 );
-const accountFormDirty = computed(
-  () => JSON.stringify(accountForm) !== initialAccountForm.value,
-);
-const accountDrawerTitle = computed(() =>
-  selected.value?.cognitoSubject ? 'Replace linked account' : 'Link employee account',
-);
 
 function setForm(values = {}) {
   Object.assign(form, {
     displayName: values.displayName || '',
+    email: values.email || '',
   });
   initialForm.value = JSON.stringify(form);
   fieldErrors.value = {};
@@ -125,27 +111,24 @@ function openEdit() {
   drawerOpen.value = true;
 }
 
-function openAccountLink() {
-  if (!selected.value) return;
-  accountForm.subject = selected.value.cognitoSubject || '';
-  initialAccountForm.value = JSON.stringify(accountForm);
-  accountFieldErrors.value = {};
-  accountDrawerOpen.value = true;
-}
-
 async function saveEmployee() {
   saving.value = true;
   fieldErrors.value = {};
   try {
-    const payload = {
-      displayName: form.displayName,
-    };
+    const payload =
+      formMode.value === 'create'
+        ? { displayName: form.displayName, email: form.email }
+        : { displayName: form.displayName };
     const saved =
       formMode.value === 'create'
         ? await adminRepository.createEmployee(payload)
         : await adminRepository.updateEmployee(selected.value.id, payload);
     drawerOpen.value = false;
-    addToast(formMode.value === 'create' ? 'Employee added.' : 'Employee updated.');
+    addToast(
+      formMode.value === 'create'
+        ? 'Employee added and invitation sent.'
+        : 'Employee updated.',
+    );
     await loadList();
     await selectEmployee(saved.id);
   } catch (error) {
@@ -175,45 +158,6 @@ async function toggleArchive() {
     addToast(error.message, 'danger');
   } finally {
     confirmBusy.value = false;
-  }
-}
-
-async function saveAccountLink() {
-  if (!selected.value) return;
-  accountSaving.value = true;
-  accountFieldErrors.value = {};
-  try {
-    await adminRepository.linkEmployeeAccount(
-      selected.value.id,
-      accountForm.subject,
-    );
-    accountDrawerOpen.value = false;
-    addToast(selected.value.cognitoSubject ? 'Linked account replaced.' : 'Employee account linked.');
-    await loadList();
-    await selectEmployee(selected.value.id);
-  } catch (error) {
-    accountFieldErrors.value = error.fieldErrors || {};
-    if (!Object.keys(accountFieldErrors.value).length) {
-      addToast(error.message, 'danger');
-    }
-  } finally {
-    accountSaving.value = false;
-  }
-}
-
-async function unlinkAccount() {
-  if (!selected.value) return;
-  unlinkBusy.value = true;
-  try {
-    await adminRepository.unlinkEmployeeAccount(selected.value.id);
-    unlinkConfirmOpen.value = false;
-    addToast('Employee account unlinked.');
-    await loadList();
-    await selectEmployee(selected.value.id);
-  } catch (error) {
-    addToast(error.message, 'danger');
-  } finally {
-    unlinkBusy.value = false;
   }
 }
 
@@ -250,7 +194,7 @@ watch(includeArchived, applySearch);
     <SearchToolbar
       v-model="search"
       v-model:include-archived="includeArchived"
-      placeholder="Search employee name"
+      placeholder="Search employee name or email"
       @search="applySearch"
     />
 
@@ -264,8 +208,8 @@ watch(includeArchived, applySearch);
             <thead>
               <tr>
                 <th>Employee</th>
+                <th>Email</th>
                 <th>Latest completion</th>
-                <th v-if="auth.canAdministerAccounts.value">Account</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -281,10 +225,8 @@ watch(includeArchived, applySearch);
                 <td>
                   <strong>{{ employee.displayName }}</strong>
                 </td>
+                <td>{{ employee.email }}</td>
                 <td>{{ employee.latestCompletionOn ? formatDate(employee.latestCompletionOn) : 'None' }}</td>
-                <td v-if="auth.canAdministerAccounts.value">
-                  {{ employee.accountLinked ? 'Linked' : 'Unlinked' }}
-                </td>
                 <td><ArchiveBadge :archived="Boolean(employee.archivedAt)" /></td>
               </tr>
             </tbody>
@@ -313,36 +255,13 @@ watch(includeArchived, applySearch);
 
         <div v-if="detailLoading" class="loading-state">Loading employee...</div>
         <div v-else-if="selected" class="detail-stack">
-          <section
-            v-if="auth.canAdministerAccounts.value"
-            class="account-panel"
-            aria-label="Employee account"
-          >
+          <section class="account-panel" aria-label="Employee account">
             <div>
               <h3 class="detail-heading">Account</h3>
-              <strong>{{ selected.cognitoSubject ? 'Linked' : 'Unlinked' }}</strong>
-              <p v-if="selected.cognitoSubject">
-                Cognito subject: <code>{{ selected.cognitoSubject }}</code>
-              </p>
-              <p v-else>
-                Link this employee to a Cognito user before they can view their training record.
-              </p>
+              <strong>{{ selected.email }}</strong>
               <small>
-                Copy the user subject from the Amazon Cognito user record.
+                This address received the Cognito account invitation when the employee was added.
               </small>
-            </div>
-            <div class="inline-actions">
-              <button class="secondary-action" type="button" @click="openAccountLink">
-                {{ selected.cognitoSubject ? 'Replace account' : 'Link account' }}
-              </button>
-              <button
-                v-if="selected.cognitoSubject"
-                class="secondary-action"
-                type="button"
-                @click="unlinkConfirmOpen = true"
-              >
-                Unlink account
-              </button>
             </div>
           </section>
           <RouterLink
@@ -392,30 +311,21 @@ watch(includeArchived, applySearch);
       <input v-model="form.displayName" required maxlength="160" />
       <small v-if="fieldErrors.displayName" class="field-error">{{ fieldErrors.displayName[0] }}</small>
     </label>
-  </FormDrawer>
 
-  <FormDrawer
-    v-if="auth.canAdministerAccounts.value"
-    :open="accountDrawerOpen"
-    :title="accountDrawerTitle"
-    :dirty="accountFormDirty"
-    :saving="accountSaving"
-    @close="accountDrawerOpen = false"
-    @save="saveAccountLink"
-  >
-    <label class="field">
-      <span>Cognito subject</span>
+    <label v-if="formMode === 'create'" class="field">
+      <span>Email</span>
       <input
-        v-model.trim="accountForm.subject"
+        v-model.trim="form.email"
         required
-        autocomplete="off"
-        placeholder="00000000-0000-0000-0000-000000000000"
+        maxlength="254"
+        type="email"
+        autocomplete="email"
       />
       <small class="field-help">
-        Enter the UUID shown as the user's sub in Amazon Cognito.
+        Cognito sends this address a temporary-password invitation.
       </small>
-      <small v-if="accountFieldErrors.subject" class="field-error">
-        {{ accountFieldErrors.subject[0] }}
+      <small v-if="fieldErrors.email" class="field-error">
+        {{ fieldErrors.email[0] }}
       </small>
     </label>
   </FormDrawer>
@@ -435,15 +345,4 @@ watch(includeArchived, applySearch);
     @confirm="toggleArchive"
   />
 
-  <ConfirmDialog
-    v-if="auth.canAdministerAccounts.value"
-    :open="unlinkConfirmOpen"
-    title="Unlink employee account?"
-    message="The employee will lose access to their training record until another Cognito account is linked."
-    confirm-label="Unlink"
-    danger
-    :busy="unlinkBusy"
-    @cancel="unlinkConfirmOpen = false"
-    @confirm="unlinkAccount"
-  />
 </template>
