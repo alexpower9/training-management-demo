@@ -259,9 +259,6 @@ watch(includeArchived, applySearch);
             <div>
               <h3 class="detail-heading">Account</h3>
               <strong>{{ selected.email }}</strong>
-              <small>
-                This address received the Cognito account invitation when the employee was added.
-              </small>
             </div>
           </section>
           <RouterLink
