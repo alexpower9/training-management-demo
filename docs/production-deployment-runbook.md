@@ -300,6 +300,14 @@ Cognito rejects an invitation template that omits `{####}`. Keep the
 application sign-in URL environment-specific and verify delivery in staging
 for both employee and administrator invitations.
 
+Do not use Cognito's default email configuration for normal production
+delivery. It has a non-adjustable quota of 50 messages per AWS account per day,
+including invitations and other Cognito email flows, and resets at 09:00 UTC.
+In the user pool's email configuration, select **Send email from Amazon SES**,
+use a verified sender identity, and move that SES Region out of the sandbox
+before inviting production users. SES then supplies the applicable sending
+quota and delivery monitoring.
+
 For pre-production testing, add localhost callback and sign-out URLs only to a
 separate non-production app client.
 

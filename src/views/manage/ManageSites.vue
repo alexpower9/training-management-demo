@@ -30,6 +30,7 @@ const fieldErrors = ref({});
 const initialForm = ref('');
 const confirmOpen = ref(false);
 const confirmBusy = ref(false);
+const timeZoneOptions = ['America/St_Johns', 'America/Labrador'];
 
 const siteForm = reactive({
   name: '',
@@ -284,9 +285,15 @@ watch(includeArchived, applySearch);
       <small v-if="fieldErrors.name" class="field-error">{{ fieldErrors.name[0] }}</small>
     </label>
     <label class="field">
-      <span>IANA time zone</span>
-      <input v-model="siteForm.timeZone" required maxlength="80" />
-      <small class="field-help">Example: America/St_Johns or America/Toronto</small>
+      <span>Time zone</span>
+      <select v-model="siteForm.timeZone" required>
+        <option v-for="timeZone in timeZoneOptions" :key="timeZone" :value="timeZone">
+          {{ timeZone }}
+        </option>
+      </select>
+      <small v-if="fieldErrors.timeZone" class="field-error">
+        {{ fieldErrors.timeZone[0] }}
+      </small>
     </label>
   </FormDrawer>
 

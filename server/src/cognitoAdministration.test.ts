@@ -67,6 +67,9 @@ test('employee provisioning creates, groups, persists, and then sends', async ()
 test('employee invitation delivery failure deletes the Cognito user', async () => {
   const events: string[] = [];
   const invitation = { email: 'delivery@example.com', displayName: 'Delivery' };
+  const deliveryError = Object.assign(new Error('delivery failed'), {
+    name: 'CodeDeliveryFailureException',
+  });
   const administration = createCognitoAdministration({
     poolId: 'pool-1',
     send: async (command) => {
@@ -76,9 +79,7 @@ test('employee invitation delivery failure deletes the Cognito user', async () =
           return { User: cognitoUser(invitation) };
         }
         events.push('send');
-        throw Object.assign(new Error('delivery failed'), {
-          name: 'CodeDeliveryFailureException',
-        });
+        throw deliveryError;
       }
       if (command instanceof AdminAddUserToGroupCommand) {
         events.push('group');
@@ -99,7 +100,52 @@ test('employee invitation delivery failure deletes the Cognito user', async () =
     ),
     (error: unknown) =>
       error instanceof AppError &&
-      error.code === 'EMPLOYEE_INVITATION_DELIVERY_FAILED',
+      error.code === 'EMPLOYEE_INVITATION_DELIVERY_FAILED' &&
+      error.cause === deliveryError,
+  );
+  assert.deepEqual(events, ['create', 'group', 'send', 'delete']);
+});
+
+test('Cognito daily email quota has a specific actionable error', async () => {
+  const events: string[] = [];
+  const invitation = { email: 'quota@example.com', displayName: 'Quota' };
+  const quotaError = Object.assign(new Error('Daily email limit exceeded'), {
+    name: 'LimitExceededException',
+  });
+  const administration = createCognitoAdministration({
+    poolId: 'pool-1',
+    send: async (command) => {
+      if (command instanceof AdminCreateUserCommand) {
+        if (command.input.MessageAction === 'SUPPRESS') {
+          events.push('create');
+          return { User: cognitoUser(invitation) };
+        }
+        events.push('send');
+        throw quotaError;
+      }
+      if (command instanceof AdminAddUserToGroupCommand) {
+        events.push('group');
+        return {};
+      }
+      if (command instanceof AdminDeleteUserCommand) {
+        events.push('delete');
+        return {};
+      }
+      throw new Error(`Unexpected command: ${command.constructor.name}`);
+    },
+  });
+
+  await assert.rejects(
+    administration.provisionEmployeeAccount(
+      invitation,
+      async (_account, sendInvitation) => sendInvitation(),
+    ),
+    (error: unknown) =>
+      error instanceof AppError &&
+      error.statusCode === 503 &&
+      error.code === 'EMPLOYEE_INVITATION_EMAIL_QUOTA_EXCEEDED' &&
+      error.message.includes('09:00 UTC') &&
+      error.cause === quotaError,
   );
   assert.deepEqual(events, ['create', 'group', 'send', 'delete']);
 });

@@ -28,14 +28,21 @@ export class AppError extends Error {
     public code: string,
     message: string,
     public fieldErrors?: Record<string, string[]>,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
 export function registerErrorHandler(app: FastifyInstance) {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {
+      if (error.statusCode >= 500) {
+        request.log.error(
+          { err: error, appErrorCode: error.code },
+          'Request failed with an operational error.',
+        );
+      }
       return reply.status(error.statusCode).send({
         code: error.code,
         message: error.message,

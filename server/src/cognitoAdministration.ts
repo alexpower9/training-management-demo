@@ -97,46 +97,69 @@ function cognitoError(
   const name = errorName(error);
   const prefix = kind === 'administrator' ? 'ADMIN' : 'EMPLOYEE';
   const label = kind === 'administrator' ? 'administrator' : 'employee';
+  const appError = (statusCode: number, code: string, message: string) =>
+    new AppError(statusCode, code, message, undefined, { cause: error });
 
   if (name === 'UsernameExistsException' || name === 'AliasExistsException') {
     return accountExistsError(kind);
   }
   if (name === 'CodeDeliveryFailureException') {
-    return new AppError(
+    return appError(
       502,
       `${prefix}_INVITATION_DELIVERY_FAILED`,
       `Cognito could not deliver the ${label} invitation.`,
     );
   }
+  if (name === 'LimitExceededException') {
+    if (phase === 'delivery') {
+      return appError(
+        503,
+        `${prefix}_INVITATION_EMAIL_QUOTA_EXCEEDED`,
+        "Cognito's daily email limit has been reached. Try again after 09:00 UTC or configure Amazon SES for production email delivery.",
+      );
+    }
+    return appError(
+      503,
+      'COGNITO_LIMIT_EXCEEDED',
+      'A Cognito service limit has been reached.',
+    );
+  }
   if (name === 'TooManyRequestsException') {
-    return new AppError(
+    return appError(
       503,
       'COGNITO_RATE_LIMITED',
       'Cognito is temporarily rate limited. Try again shortly.',
     );
   }
   if (name === 'NotAuthorizedException' || name === 'AccessDeniedException') {
-    return new AppError(
+    return appError(
       502,
       `${prefix}_ACCOUNT_PROVISIONING_NOT_AUTHORIZED`,
       'The API is not permitted to administer Cognito users.',
     );
   }
+  if (name === 'InvalidEmailRoleAccessPolicyException') {
+    return appError(
+      502,
+      `${prefix}_INVITATION_EMAIL_CONFIGURATION_INVALID`,
+      'Cognito email delivery is not configured correctly.',
+    );
+  }
   if (name === 'InvalidParameterException' || name === 'InvalidPasswordException') {
-    return new AppError(
+    return appError(
       400,
       `${prefix}_ACCOUNT_PROVISIONING_INVALID`,
       `Cognito rejected the ${label} invitation.`,
     );
   }
   if (phase === 'delivery') {
-    return new AppError(
+    return appError(
       502,
       `${prefix}_INVITATION_DELIVERY_FAILED`,
       `Cognito could not deliver the ${label} invitation.`,
     );
   }
-  return new AppError(
+  return appError(
     502,
     `${prefix}_ACCOUNT_PROVISIONING_FAILED`,
     `Cognito could not provision the ${label} account.`,
