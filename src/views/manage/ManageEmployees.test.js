@@ -101,6 +101,36 @@ describe('ManageEmployees', () => {
     expect(wrapper.text()).not.toContain('Cognito subject');
   });
 
+  it('marks expired completion history as overdue instead of active', async () => {
+    mocks.getEmployee.mockResolvedValue({
+      id: 'employee-1',
+      displayName: 'Alex Power',
+      email: 'alex@example.com',
+      archivedAt: null,
+      latestCompletionOn: '2019-01-01',
+      completions: [
+        {
+          id: 'completion-1',
+          course: { id: 'course-1', name: 'Fall Arrest' },
+          completedOn: '2019-01-01',
+          expiresOn: '2020-01-01',
+          voidedAt: null,
+        },
+      ],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('tbody tr').trigger('click');
+    await flushPromises();
+
+    const completionRowText = wrapper.get('.requirement-row').text();
+    expect(completionRowText).toContain('Fall Arrest');
+    expect(completionRowText).toContain('Overdue');
+    expect(completionRowText).toContain('Expired');
+    expect(completionRowText).not.toContain('Active');
+  });
+
   it('shows structured email validation errors', async () => {
     mocks.createEmployee.mockRejectedValue({
       message: 'Invalid employee',
