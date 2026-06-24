@@ -221,7 +221,7 @@ h2 {
 .panel-header p,
 .data-table span:not(.status-badge):not(.archive-badge),
 .field span,
-.requirement-row span:not(.status-badge),
+.requirement-row span:not(.status-badge):not(.archive-badge),
 .profile-strip span,
 .empty-state p {
   color: var(--color-muted);
@@ -459,7 +459,7 @@ h2 {
   text-align: right;
 }
 
-.requirement-status span:not(.status-badge) {
+.requirement-status span:not(.status-badge):not(.archive-badge) {
   color: var(--color-muted);
   font-size: 0.82rem;
 }
@@ -525,7 +525,7 @@ h2 {
 }
 
 .requirement-row strong,
-.requirement-row span:not(.status-badge) {
+.requirement-row span:not(.status-badge):not(.archive-badge) {
   display: block;
 }
 
