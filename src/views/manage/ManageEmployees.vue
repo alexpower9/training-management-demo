@@ -12,11 +12,13 @@ import StatusBadge from '@/components/StatusBadge.vue';
 import { addToast } from '@/composables/useToasts';
 import { formatDate } from '@/data/trainingDemoData';
 import { adminRepository } from '@/services/adminRepository';
-import { todayDate } from '@/utils/dates';
+import {
+  completionStatus,
+  daysUntilExpiry,
+} from '@/utils/completionStatus';
 
 const route = useRoute();
 const router = useRouter();
-const EXPIRING_WARNING_DAYS = 45;
 const items = ref([]);
 const total = ref(0);
 const page = ref(Number(route.query.page) || 1);
@@ -176,25 +178,8 @@ function changePage(nextPage) {
   loadList();
 }
 
-function completionDaysUntilExpiry(completion) {
-  if (!completion?.expiresOn) return null;
-  const expiresOn = new Date(`${completion.expiresOn}T00:00:00.000Z`);
-  const asOf = new Date(`${todayDate()}T00:00:00.000Z`);
-  return Math.ceil((expiresOn.getTime() - asOf.getTime()) / 86400000);
-}
-
-function completionStatus(completion) {
-  const remainingDays = completionDaysUntilExpiry(completion);
-
-  if (remainingDays !== null && remainingDays < 0) return 'overdue';
-  if (remainingDays !== null && remainingDays <= EXPIRING_WARNING_DAYS) {
-    return 'expiring';
-  }
-  return 'compliant';
-}
-
 function completionExpiryText(completion) {
-  const prefix = completionDaysUntilExpiry(completion) < 0 ? 'Expired' : 'Expires';
+  const prefix = daysUntilExpiry(completion) < 0 ? 'Expired' : 'Expires';
   return `${prefix} ${formatDate(completion.expiresOn)}`;
 }
 

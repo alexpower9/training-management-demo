@@ -142,4 +142,36 @@ describe('ManageCompletions', () => {
       completedOn: '2026-01-31',
     });
   });
+
+  it('marks expired non-voided completions as overdue instead of current', async () => {
+    mocks.listCompletions.mockResolvedValue({
+      items: [
+        {
+          id: 'completion-overdue',
+          employeeId: 'employee-1',
+          courseId: 'course-1',
+          employee: { displayName: 'Alex Power' },
+          course: { name: 'First Aid' },
+          completedOn: '2019-01-01',
+          expiresOn: '2020-01-01',
+          voidedAt: null,
+        },
+      ],
+      total: 1,
+    });
+    const wrapper = mount(ManageCompletions, {
+      global: {
+        stubs: {
+          Teleport: true,
+          RouterLink: true,
+        },
+      },
+    });
+    await flushPromises();
+
+    const rowText = wrapper.get('tbody tr').text();
+    expect(rowText).toContain('First Aid');
+    expect(rowText).toContain('Overdue');
+    expect(rowText).not.toContain('Current');
+  });
 });
