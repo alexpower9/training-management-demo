@@ -5,9 +5,11 @@ import DetailPanel from '@/components/manage/DetailPanel.vue';
 import FormDrawer from '@/components/manage/FormDrawer.vue';
 import PaginationControls from '@/components/manage/PaginationControls.vue';
 import ResourceTable from '@/components/manage/ResourceTable.vue';
+import StatusBadge from '@/components/StatusBadge.vue';
 import { addToast } from '@/composables/useToasts';
 import { formatDate } from '@/data/trainingDemoData';
 import { adminRepository } from '@/services/adminRepository';
+import { completionStatus } from '@/utils/completionStatus';
 import { addCalendarMonths, todayDate } from '@/utils/dates';
 
 const route = useRoute();
@@ -291,11 +293,12 @@ watch(includeVoided, applySearch);
                 <td>{{ formatDate(completion.expiresOn) }}</td>
                 <td>
                   <span
-                    class="archive-badge"
-                    :class="{ 'archive-badge--archived': completion.voidedAt }"
+                    v-if="completion.voidedAt"
+                    class="archive-badge archive-badge--archived"
                   >
-                    {{ completion.voidedAt ? 'Voided' : 'Current' }}
+                    Voided
                   </span>
+                  <StatusBadge v-else :status="completionStatus(completion)" />
                 </td>
               </tr>
             </tbody>
