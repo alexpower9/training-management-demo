@@ -65,6 +65,10 @@ function activeFilter(includeArchived: string) {
   return includeArchived === 'true' ? {} : { archivedAt: null };
 }
 
+const activeCourseRequirementFilter = {
+  course: { archivedAt: null },
+} satisfies Prisma.SiteCourseRequirementWhereInput;
+
 function dateFields<T extends { completedOn: Date; expiresOn: Date }>(row: T) {
   return {
     ...row,
@@ -272,7 +276,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const [items, total] = await Promise.all([
       prisma.site.findMany({
         where,
-        include: { _count: { select: { requirements: true } } },
+        include: {
+          _count: {
+            select: {
+              requirements: { where: activeCourseRequirementFilter },
+            },
+          },
+        },
         orderBy: { name: 'asc' },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
@@ -298,6 +308,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       where: { id: parseId(request) },
       include: {
         requirements: {
+          where: activeCourseRequirementFilter,
           include: { course: true },
           orderBy: { course: { name: 'asc' } },
         },

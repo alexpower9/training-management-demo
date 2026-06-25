@@ -496,6 +496,23 @@ test(
         [site.id],
       );
 
+      const siteListAfterCourseArchive = await request(
+        'GET',
+        '/api/v1/admin/sites?search=Constraint%20Site',
+      );
+      assert.equal(siteListAfterCourseArchive.statusCode, 200);
+      assert.equal(
+        siteListAfterCourseArchive.json().items[0]._count.requirements,
+        0,
+      );
+
+      const siteDetailAfterCourseArchive = await request(
+        'GET',
+        `/api/v1/admin/sites/${site.id}`,
+      );
+      assert.equal(siteDetailAfterCourseArchive.statusCode, 200);
+      assert.deepEqual(siteDetailAfterCourseArchive.json().requirements, []);
+
       const suspendedReadinessResponse = await request(
         'GET',
         `/api/v1/sites/${site.id}/readiness?asOf=2026-06-05`,
@@ -510,6 +527,20 @@ test(
       );
 
       await request('POST', `/api/v1/admin/courses/${course.id}/restore`);
+      const siteDetailAfterCourseRestore = await request(
+        'GET',
+        `/api/v1/admin/sites/${site.id}`,
+      );
+      assert.equal(siteDetailAfterCourseRestore.statusCode, 200);
+      assert.deepEqual(
+        siteDetailAfterCourseRestore
+          .json()
+          .requirements.map(
+            (requirement: { courseId: string }) => requirement.courseId,
+          ),
+        [course.id],
+      );
+
       const restoredReadinessResponse = await request(
         'GET',
         `/api/v1/sites/${site.id}/readiness?asOf=2026-06-05`,
