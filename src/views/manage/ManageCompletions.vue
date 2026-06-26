@@ -61,8 +61,14 @@ const generalCourses = computed(() => {
     (course) => assignedActiveSiteIds(course).size > 1,
   );
 });
+const noSiteRequirementCourses = computed(() =>
+  courses.value.filter((course) => !course.requirements?.length),
+);
 const siteCourseGroups = computed(() => {
   const generalCourseIds = new Set(generalCourses.value.map((course) => course.id));
+  const noSiteRequirementCourseIds = new Set(
+    noSiteRequirementCourses.value.map((course) => course.id),
+  );
 
   return activeSites.value
     .map((site) => ({
@@ -70,6 +76,7 @@ const siteCourseGroups = computed(() => {
       courses: courses.value.filter(
         (course) =>
           !generalCourseIds.has(course.id) &&
+          !noSiteRequirementCourseIds.has(course.id) &&
           course.requirements?.some((requirement) => requirement.siteId === site.id),
       ),
     }))
@@ -78,6 +85,7 @@ const siteCourseGroups = computed(() => {
 const otherCourses = computed(() => {
   const groupedCourseIds = new Set([
     ...generalCourses.value.map((course) => course.id),
+    ...noSiteRequirementCourses.value.map((course) => course.id),
     ...siteCourseGroups.value.flatMap((group) =>
       group.courses.map((course) => course.id),
     ),
@@ -384,6 +392,15 @@ watch(includeVoided, applySearch);
         <option value="" disabled>Select a course</option>
         <optgroup v-if="generalCourses.length" label="General courses">
           <option v-for="course in generalCourses" :key="course.id" :value="course.id">
+            {{ course.name }}
+          </option>
+        </optgroup>
+        <optgroup v-if="noSiteRequirementCourses.length" label="No Site Requirement">
+          <option
+            v-for="course in noSiteRequirementCourses"
+            :key="course.id"
+            :value="course.id"
+          >
             {{ course.name }}
           </option>
         </optgroup>

@@ -74,6 +74,55 @@ test.describe.serial('training management smoke tests', () => {
     await expect(page.getByRole('button', { name: 'Assign course' })).toHaveCount(0);
   });
 
+  test('no-site course can be completed without becoming a site requirement', async ({
+    page,
+    request,
+  }) => {
+    const employee = await create(request, '/employees', {
+      displayName: unique('General Course Employee'),
+      email: `${unique('general-course-employee')}@example.com`,
+    });
+    const site = await create(request, '/sites', {
+      name: unique('General Course Site'),
+      timeZone: 'America/St_Johns',
+    });
+    const courseName = unique('General Course');
+
+    await page.goto('/manage/courses');
+    await page.getByRole('button', { name: 'Add course' }).click();
+    await page.getByLabel('Course name').fill(courseName);
+    await page.getByLabel('No Site Requirement').check();
+    await page.getByLabel('Validity in months').fill('12');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Course added.')).toBeVisible();
+    await expect(
+      page
+        .locator('tbody tr')
+        .filter({ hasText: courseName })
+        .getByText('Does not affect readiness'),
+    ).toBeVisible();
+
+    const coursesResponse = await request.get('/api/v1/admin/courses', {
+      headers: adminHeaders,
+      params: { search: courseName },
+    });
+    const course = (await coursesResponse.json()).items[0];
+    expect(course.requirements).toHaveLength(0);
+
+    await page.goto(`/manage/completions?action=create&employeeId=${employee.id}`);
+    await page.locator('.form-drawer select').nth(1).selectOption(course.id);
+    await page.getByLabel('Completed on').fill('2026-02-15');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Completion recorded.')).toBeVisible();
+
+    const siteCoursesResponse = await request.get(`/api/v1/sites/${site.id}/courses`, {
+      headers: adminHeaders,
+    });
+    expect(
+      (await siteCoursesResponse.json()).some((siteCourse) => siteCourse.id === course.id),
+    ).toBe(false);
+  });
+
   test('completion entry, renewal setup, and voiding', async ({ page, request }) => {
     const employee = await create(request, '/employees', {
       displayName: unique('Completion Employee'),

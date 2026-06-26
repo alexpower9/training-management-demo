@@ -97,8 +97,9 @@ course assignments. Restoring the site restores those assignments unchanged.
 Course names are permanently unique case-insensitively, including after
 archive. `validity_months` is an integer from 1 through 120.
 
-Course creation and editing require at least one site assignment. The
-application validates that newly assigned sites are active.
+Course creation and editing may use zero or more site assignments. A course
+with no site assignments can still receive completion records, but it does not
+affect readiness. The application validates that newly assigned sites are active.
 
 Archiving a course preserves its site assignments but suspends the course from
 readiness and new completion entry. Restoring it reactivates the same
