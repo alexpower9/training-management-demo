@@ -144,7 +144,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         where,
         include: {
           completions: {
-            where: { voidedAt: null },
+            where: { voidedAt: null, course: { archivedAt: null } },
             select: { completedOn: true },
             orderBy: { completedOn: 'desc' },
             take: 1,
@@ -175,6 +175,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       where: { id: parseId(request) },
       include: {
         completions: {
+          where: { course: { archivedAt: null } },
           include: { course: true },
           orderBy: [{ completedOn: 'desc' }, { recordedAt: 'desc' }],
         },
