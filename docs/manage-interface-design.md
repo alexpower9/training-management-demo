@@ -118,15 +118,17 @@ The course catalogue shows:
 - assigned-site names and count
 - active or archived state
 
-Course Add/Edit requires a name, one or more sites, and validity in months.
-“Select all” selects the active sites that exist at that time; later sites are
-not automatically added. Course detail shows assigned sites and recent
-employee completion history.
+Course Add/Edit requires a name, validity in months, and either assigned sites
+or `No Site Requirement`. “Select all” selects the active sites that exist at
+that time; later sites are not automatically added. No-site courses can receive
+completion records but do not affect readiness. Course detail shows assigned
+sites or the no-site state, plus recent employee completion history.
 
 Courses do not have a reusable or site-specific flag:
 
 - one assigned site normally represents site-specific training
 - multiple assigned sites represents a shared course
+- no assigned sites represents training tracked outside site readiness
 
 Course names are permanently unique case-insensitively. Archiving preserves
 site assignments while removing the course from readiness and new completion

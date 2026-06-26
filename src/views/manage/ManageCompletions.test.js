@@ -78,6 +78,12 @@ describe('ManageCompletions', () => {
           requirements: [{ siteId: 'site-1', site: sites[0] }],
         },
         {
+          id: 'course-no-site',
+          name: 'General Safety Awareness',
+          validityMonths: 12,
+          requirements: [],
+        },
+        {
           id: 'course-north',
           name: 'North Ridge Orientation',
           validityMonths: 12,
@@ -100,14 +106,16 @@ describe('ManageCompletions', () => {
     const groups = wrapper.findAll('.form-drawer select')[1].findAll('optgroup');
     expect(groups.map((group) => group.attributes('label'))).toEqual([
       'General courses',
+      'No Site Requirement',
       'East Pit',
       'North Ridge',
     ]);
     expect(groups[0].text()).toContain('First Aid');
-    expect(groups[1].text()).toContain('East Pit Orientation');
-    expect(groups[2].text()).toContain('North Ridge Orientation');
-    expect(groups[1].text()).not.toContain('First Aid');
+    expect(groups[1].text()).toContain('General Safety Awareness');
+    expect(groups[2].text()).toContain('East Pit Orientation');
+    expect(groups[3].text()).toContain('North Ridge Orientation');
     expect(groups[2].text()).not.toContain('First Aid');
+    expect(groups[3].text()).not.toContain('First Aid');
     expect(
       wrapper
         .findAll('.form-drawer select')[1]

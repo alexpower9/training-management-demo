@@ -170,12 +170,26 @@ test(
         [site.id, secondSite.id].sort(),
       );
 
-      const emptySitesResponse = await request('POST', '/api/v1/admin/courses', {
+      const noSiteCourseResponse = await request('POST', '/api/v1/admin/courses', {
         name: 'No Site Course',
         validityMonths: 12,
         siteIds: [],
       });
-      assert.equal(emptySitesResponse.statusCode, 400);
+      assert.equal(noSiteCourseResponse.statusCode, 201);
+      const noSiteCourse = noSiteCourseResponse.json();
+      assert.deepEqual(noSiteCourse.requirements, []);
+
+      const siteCoursesAfterNoSiteCourse = await request(
+        'GET',
+        `/api/v1/sites/${site.id}/courses`,
+      );
+      assert.equal(siteCoursesAfterNoSiteCourse.statusCode, 200);
+      assert.equal(
+        siteCoursesAfterNoSiteCourse
+          .json()
+          .some((siteCourse: { id: string }) => siteCourse.id === noSiteCourse.id),
+        false,
+      );
 
       const invalidValidityResponse = await request('POST', '/api/v1/admin/courses', {
         name: 'Invalid Validity Course',
@@ -199,6 +213,28 @@ test(
       assert.equal(courseResponse.statusCode, 201);
       const course = courseResponse.json();
       assert.equal(course.requirements.length, 2);
+
+      const siteAssignedCourseResponse = await request(
+        'POST',
+        '/api/v1/admin/courses',
+        {
+          name: 'Site Assigned Then General',
+          validityMonths: 12,
+          siteIds: [site.id],
+        },
+      );
+      assert.equal(siteAssignedCourseResponse.statusCode, 201);
+      const noSiteUpdateResponse = await request(
+        'PATCH',
+        `/api/v1/admin/courses/${siteAssignedCourseResponse.json().id}`,
+        {
+          name: 'Site Assigned Then General',
+          validityMonths: 12,
+          siteIds: [],
+        },
+      );
+      assert.equal(noSiteUpdateResponse.statusCode, 200);
+      assert.deepEqual(noSiteUpdateResponse.json().requirements, []);
 
       const duplicateCourseResponse = await request('POST', '/api/v1/admin/courses', {
         name: 'calendar month safety',
@@ -404,6 +440,7 @@ test(
       const readiness = readinessResponse.json();
       assert.equal(JSON.stringify(readiness).includes('recordedBySubject'), false);
       assert.equal(JSON.stringify(readiness).includes('voidedBySubject'), false);
+      assert.equal(JSON.stringify(readiness).includes(noSiteCourse.id), false);
       assert.deepEqual(
         readiness.map((row: { status: string }) => row.status).sort(),
         ['compliant', 'expiring', 'incomplete', 'overdue'].sort(),
