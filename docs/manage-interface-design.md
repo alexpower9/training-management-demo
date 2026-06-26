@@ -62,7 +62,7 @@ An employee contains only:
 
 The list shows name, email, latest completion date, and archive state. Search is
 by name or email. The detail panel supports edit, archive/restore, quick
-completion entry, current training, and full completion history.
+completion entry, current training, and active-course completion history.
 
 Adding an employee requires name and email for administrators and owners. The
 API creates the Cognito user with invitation delivery initially suppressed,

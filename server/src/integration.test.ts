@@ -583,6 +583,31 @@ test(
         [site.id],
       );
 
+      const employeeDetailAfterCourseArchive = await request(
+        'GET',
+        `/api/v1/admin/employees/${employee.id}`,
+      );
+      assert.equal(employeeDetailAfterCourseArchive.statusCode, 200);
+      assert.equal(
+        employeeDetailAfterCourseArchive
+          .json()
+          .completions.some(
+            (completion: { course: { id: string } }) =>
+              completion.course.id === course.id,
+          ),
+        false,
+      );
+
+      const employeeListAfterCourseArchive = await request(
+        'GET',
+        '/api/v1/admin/employees?search=Overdue%20Employee',
+      );
+      assert.equal(employeeListAfterCourseArchive.statusCode, 200);
+      assert.equal(
+        employeeListAfterCourseArchive.json().items[0].latestCompletionOn,
+        null,
+      );
+
       const siteListAfterCourseArchive = await request(
         'GET',
         '/api/v1/admin/sites?search=Constraint%20Site',
