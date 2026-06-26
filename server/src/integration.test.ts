@@ -230,16 +230,25 @@ test(
         employeeId: employee.id,
         courseId: course.id,
         completedOn: '2024-01-31',
+        comment: 'Certificate uploaded to shared drive.',
       });
       assert.equal(completionResponse.statusCode, 201);
       assert.equal(completionResponse.json().expiresOn, '2024-02-29');
       assert.equal(completionResponse.json().validityMonthsApplied, 1);
+      assert.equal(
+        completionResponse.json().comment,
+        'Certificate uploaded to shared drive.',
+      );
 
       const adminCompletionList = await request(
         'GET',
         `/api/v1/admin/completions?employeeId=${employee.id}`,
       );
       assert.equal(adminCompletionList.statusCode, 200);
+      assert.equal(
+        adminCompletionList.json().items[0].comment,
+        'Certificate uploaded to shared drive.',
+      );
       assert.equal(
         JSON.stringify(adminCompletionList.json()).includes('cognitoSubject'),
         false,
@@ -250,6 +259,10 @@ test(
       );
       assert.equal(completionList.statusCode, 200);
       assert.equal(
+        completionList.json()[0].comment,
+        'Certificate uploaded to shared drive.',
+      );
+      assert.equal(
         JSON.stringify(completionList.json()).includes('cognitoSubject'),
         false,
       );
@@ -258,9 +271,41 @@ test(
         `/api/v1/admin/courses/${course.id}`,
       );
       assert.equal(
+        courseDetailWithCompletion.json().completions[0].comment,
+        'Certificate uploaded to shared drive.',
+      );
+      assert.equal(
         JSON.stringify(courseDetailWithCompletion.json()).includes('cognitoSubject'),
         false,
       );
+
+      const blankCommentResponse = await request(
+        'POST',
+        '/api/v1/admin/completions',
+        {
+          employeeId: employee.id,
+          courseId: course.id,
+          completedOn: '2024-02-01',
+          comment: '   ',
+        },
+      );
+      assert.equal(blankCommentResponse.statusCode, 201);
+      assert.equal(blankCommentResponse.json().comment, null);
+
+      const longCommentResponse = await request(
+        'POST',
+        '/api/v1/admin/completions',
+        {
+          employeeId: employee.id,
+          courseId: course.id,
+          completedOn: '2024-02-02',
+          comment: 'x'.repeat(501),
+        },
+      );
+      assert.equal(longCommentResponse.statusCode, 400);
+      assert.deepEqual(longCommentResponse.json().fieldErrors.comment, [
+        'String must contain at most 500 character(s)',
+      ]);
 
       const duplicateCompletionResponse = await request(
         'POST',
@@ -296,6 +341,10 @@ test(
       });
       assert.equal(storedCompletion?.expiresOn.toISOString().slice(0, 10), '2024-02-29');
       assert.equal(storedCompletion?.validityMonthsApplied, 1);
+      assert.equal(
+        storedCompletion?.comment,
+        'Certificate uploaded to shared drive.',
+      );
 
       const expiringEmployee = await prisma.employee.create({
         data: {
@@ -396,6 +445,7 @@ test(
       );
       assert.equal(JSON.stringify(selfReadiness).includes('recordedBySubject'), false);
       assert.equal(JSON.stringify(selfReadiness).includes('voidedBySubject'), false);
+      assert.equal(JSON.stringify(selfReadiness).includes('comment'), false);
 
       for (const url of [
         '/api/v1/employees',

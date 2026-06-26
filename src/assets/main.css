@@ -464,6 +464,48 @@ h2 {
   font-size: 0.82rem;
 }
 
+.completion-meta-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.comment-icon-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--color-muted);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  place-items: center;
+}
+
+.comment-icon-button:hover,
+.comment-icon-button:focus-visible {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.comment-icon-button:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--color-gold);
+}
+
+.comment-icon-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .detail-panel {
   min-width: 0;
 }
@@ -479,6 +521,28 @@ h2 {
 .profile-strip strong,
 .profile-strip span {
   display: block;
+}
+
+.completion-comment {
+  padding: 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.completion-comment p,
+.completion-comment-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.comment-dialog .completion-comment-text {
+  padding: 0.85rem;
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
 }
 
 .eligibility-strip {
@@ -1081,6 +1145,10 @@ h2 {
   .requirement-status {
     align-items: flex-start;
     text-align: left;
+  }
+
+  .completion-meta-actions {
+    justify-content: flex-start;
   }
 
   .primary-action,

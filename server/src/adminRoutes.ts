@@ -56,6 +56,12 @@ const completionInput = z.object({
   employeeId: identifier,
   courseId: identifier,
   completedOn: dateOnlyString,
+  comment: z
+    .string()
+    .trim()
+    .max(500)
+    .nullish()
+    .transform((comment) => comment || null),
 });
 const voidInput = z.object({
   reason: z.string().trim().min(3).max(500),
@@ -562,6 +568,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         completedOn: parseDateOnly(data.completedOn),
         expiresOn: parseDateOnly(expiresOn),
         validityMonthsApplied,
+        comment: data.comment,
         recordedBySubject: request.auth.subject,
       },
     });

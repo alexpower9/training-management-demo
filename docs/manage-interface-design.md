@@ -139,14 +139,17 @@ Completion entry is optimized for the common workflow:
 1. Choose an employee.
 2. Choose an active course.
 3. Enter the completion date.
-4. Review the automatically calculated expiry.
-5. Save.
+4. Optionally add a short comment.
+5. Review the automatically calculated expiry.
+6. Save.
 
 Calculated expiry previews the course validity period and month-end clamping.
 The saved validity snapshot prevents later course changes from rewriting
 existing completion expiry.
 
 History can be searched and filtered by employee, course, and void state.
+Comments appear in completion detail and can be opened from compact history rows
+without changing the default list layout.
 Completion rows are not edited:
 
 - Renewal opens a new entry prefilled with employee and course.

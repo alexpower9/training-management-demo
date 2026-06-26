@@ -92,9 +92,11 @@ test.describe.serial('training management smoke tests', () => {
     await page.goto(`/manage/completions?action=create&employeeId=${employee.id}`);
     await page.getByLabel('Course').selectOption(course.id);
     await page.getByLabel('Completed on').fill('2026-01-31');
+    await page.getByLabel('Comment').fill('Certificate verified during smoke test');
     await expect(page.getByText('Expires Feb 28, 2026')).toBeVisible();
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByText('Completion recorded.')).toBeVisible();
+    await expect(page.getByText('Certificate verified during smoke test')).toBeVisible();
 
     await page.locator('tbody').getByText(employee.displayName, { exact: true }).click();
     await page.getByRole('button', { name: 'Renew' }).click();
