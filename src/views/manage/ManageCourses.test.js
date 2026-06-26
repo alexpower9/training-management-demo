@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   listCourses: vi.fn(),
   listSiteOptions: vi.fn(),
   createCourse: vi.fn(),
+  getCourse: vi.fn(),
 }));
 
 vi.mock('vue-router', () => ({
@@ -19,7 +20,7 @@ vi.mock('@/services/adminRepository', () => ({
     listCourses: mocks.listCourses,
     listSiteOptions: mocks.listSiteOptions,
     createCourse: mocks.createCourse,
-    getCourse: vi.fn(),
+    getCourse: mocks.getCourse,
     updateCourse: vi.fn(),
     setCourseArchived: vi.fn(),
   },
@@ -35,6 +36,20 @@ describe('ManageCourses', () => {
       { id: 'site-3', name: 'Old Site', archivedAt: '2026-01-01T00:00:00.000Z' },
     ]);
     mocks.createCourse.mockResolvedValue({ id: 'course-1' });
+    mocks.getCourse.mockResolvedValue({
+      id: 'course-1',
+      name: 'East Pit Orientation',
+      validityMonths: 12,
+      archivedAt: null,
+      requirements: [
+        {
+          siteId: 'site-2',
+          courseId: 'course-1',
+          site: { id: 'site-2', name: 'East Pit', archivedAt: null },
+        },
+      ],
+      completions: [],
+    });
   });
 
   it('creates a course with all currently active sites', async () => {
@@ -104,5 +119,75 @@ describe('ManageCourses', () => {
       validityMonths: 12,
       siteIds: ['site-2'],
     });
+  });
+
+  it('opens completion comments from course history without showing them inline', async () => {
+    mocks.listCourses.mockResolvedValue({
+      items: [
+        {
+          id: 'course-1',
+          name: 'East Pit Orientation',
+          validityMonths: 12,
+          archivedAt: null,
+          requirements: [
+            {
+              siteId: 'site-2',
+              courseId: 'course-1',
+              site: { id: 'site-2', name: 'East Pit', archivedAt: null },
+            },
+          ],
+        },
+      ],
+      total: 1,
+    });
+    mocks.getCourse.mockResolvedValue({
+      id: 'course-1',
+      name: 'East Pit Orientation',
+      validityMonths: 12,
+      archivedAt: null,
+      requirements: [
+        {
+          siteId: 'site-2',
+          courseId: 'course-1',
+          site: { id: 'site-2', name: 'East Pit', archivedAt: null },
+        },
+      ],
+      completions: [
+        {
+          id: 'completion-1',
+          employee: { id: 'employee-1', displayName: 'Alex Power' },
+          completedOn: '2026-01-31',
+          expiresOn: '2027-01-31',
+          comment: 'Certificate verified by site supervisor.',
+        },
+      ],
+    });
+
+    const wrapper = mount(ManageCourses, {
+      global: {
+        stubs: {
+          Teleport: true,
+        },
+      },
+    });
+    await flushPromises();
+
+    await wrapper.get('tbody tr').trigger('click');
+    await flushPromises();
+
+    const rowText = wrapper
+      .findAll('.requirement-row')
+      .map((row) => row.text())
+      .find((text) => text.includes('Alex Power'));
+    expect(rowText).toContain('Alex Power');
+    expect(rowText).not.toContain('Certificate verified by site supervisor.');
+
+    await wrapper
+      .get('button[aria-label="View completion comment for Alex Power"]')
+      .trigger('click');
+
+    expect(wrapper.get('.comment-dialog').text()).toContain(
+      'Certificate verified by site supervisor.',
+    );
   });
 });

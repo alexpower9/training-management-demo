@@ -36,6 +36,7 @@ export const completions = employees.flatMap((employee) =>
         completedOn: exception?.completedOn || demoData.defaultCompletion.completedOn,
         expiresOn: exception?.expiresOn || demoData.defaultCompletion.expiresOn,
         validityMonthsApplied: null,
+        comment: null,
         recordedBySubject: 'demo-seed',
         recordedAt: '2026-06-05T12:00:00.000Z',
         voidedAt: null,

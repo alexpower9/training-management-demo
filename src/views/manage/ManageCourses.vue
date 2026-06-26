@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ArchiveBadge from '@/components/manage/ArchiveBadge.vue';
+import CompletionCommentButton from '@/components/manage/CompletionCommentButton.vue';
 import ConfirmDialog from '@/components/manage/ConfirmDialog.vue';
 import DetailPanel from '@/components/manage/DetailPanel.vue';
 import FormDrawer from '@/components/manage/FormDrawer.vue';
@@ -331,7 +332,13 @@ watch(includeArchived, applySearch);
                   <strong>{{ completion.employee.displayName }}</strong>
                   <span>Completed {{ formatDate(completion.completedOn) }}</span>
                 </div>
-                <span>Expires {{ formatDate(completion.expiresOn) }}</span>
+                <div class="completion-meta-actions">
+                  <span>Expires {{ formatDate(completion.expiresOn) }}</span>
+                  <CompletionCommentButton
+                    :comment="completion.comment"
+                    :label="`View completion comment for ${completion.employee.displayName}`"
+                  />
+                </div>
               </article>
             </div>
             <div v-else class="empty-state">

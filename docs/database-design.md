@@ -122,6 +122,7 @@ row immediately changes the selected site's readiness requirements.
 - `completed_on date not null`
 - `expires_on date not null`
 - `validity_months_applied smallint null`
+- `comment varchar(500) null`
 - `recorded_by_subject varchar(255) not null`
 - `recorded_at timestamptz not null`
 - `voided_at timestamptz null`
@@ -138,7 +139,8 @@ Rules:
   be inserted twice
 
 Completion rows are immutable. Renewals create new rows; corrections void the
-incorrect row with a required reason.
+incorrect row with a required reason. Optional comments are saved at record
+creation and are not edited later.
 
 Expiry uses calendar-month arithmetic with month-end clamping.
 January 31 plus one month becomes February 28 or 29. The API permanently stores
