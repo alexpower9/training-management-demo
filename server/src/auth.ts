@@ -122,7 +122,7 @@ export async function resolveEmployeeAccount(
     throw new AppError(
       403,
       'EMPLOYEE_ACCOUNT_NOT_LINKED',
-      'Your account is not linked to an employee training record.',
+      'Your account is not linked to an employee record.',
     );
   }
 
@@ -130,7 +130,7 @@ export async function resolveEmployeeAccount(
     throw new AppError(
       403,
       'EMPLOYEE_ACCOUNT_INACTIVE',
-      'Your employee training record is inactive.',
+      'Your employee record is inactive.',
     );
   }
 

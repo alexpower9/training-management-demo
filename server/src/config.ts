@@ -85,6 +85,26 @@ export function validateProductionDatabaseUrl(value: string) {
   }
 }
 
+export function validateDatabaseConfiguration({
+  nodeEnv,
+  databaseUrl,
+  databaseSecretArn,
+}: {
+  nodeEnv: string;
+  databaseUrl?: string;
+  databaseSecretArn?: string;
+}) {
+  if (nodeEnv !== 'production') return;
+
+  if (databaseSecretArn && databaseUrl) {
+    throw new Error(
+      'Production must configure DATABASE_SECRET_ARN without DATABASE_URL.',
+    );
+  }
+
+  if (databaseUrl) validateProductionDatabaseUrl(databaseUrl);
+}
+
 export async function ensureDatabaseUrl() {
   if (process.env.DATABASE_URL) {
     return;
@@ -120,6 +140,12 @@ export function validateProductionConfig() {
     throw new Error('Development authentication cannot be used in production.');
   }
 
+  validateDatabaseConfiguration({
+    nodeEnv: config.nodeEnv,
+    databaseUrl: process.env.DATABASE_URL,
+    databaseSecretArn: config.databaseSecretArn,
+  });
+
   if (
     config.authMode === 'cognito' &&
     (!config.cognitoUserPoolId || !config.cognitoClientId)
@@ -147,7 +173,4 @@ export function validateProductionConfig() {
     );
   }
 
-  if (config.nodeEnv === 'production' && process.env.DATABASE_URL) {
-    validateProductionDatabaseUrl(process.env.DATABASE_URL);
-  }
 }

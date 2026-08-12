@@ -1,34 +1,41 @@
-# NME Training Database Design
+# NME Training and Medical Database Design
 
 Status: implemented in Prisma, PostgreSQL migration SQL, Fastify, and the
 shared seed.
 
 ## Product Rules
 
-1. Selecting any active site shows every active employee.
-2. Every course assigned to a site applies equally to every employee.
+1. Selecting any active site shows every active employee to administrators and
+   owners. Employee accounts see only their own record.
+2. Every course or medical assigned to a site applies equally to every
+   employee.
 3. Employees contain a display name, email, Cognito subject, and archive state.
    Job title, crew, home base, and external HR identifiers are outside the
    product.
-4. An active course is assigned to one or many sites.
-5. One completion can satisfy the same course at every site where it is
-   assigned.
-6. Site-specific training is represented by a distinct course assigned only to
-   that site.
+4. An active course or medical is assigned to one or many sites, or is
+   explicitly tracked with `No Site Requirement`.
+5. One completion can satisfy the same item at every site where that item is
+   assigned. Course completions and medical completions remain strictly
+   separate.
+6. A site-specific requirement is represented by a distinct course or medical
+   assigned only to that site.
 7. Company-wide mandatory courses are not modeled.
-8. Expiry is calculated from the course validity period when a completion is
-   recorded.
-9. An employee is eligible only when every course required by the selected
-   site is current.
-10. A site with no assigned courses shows every employee as `noRequirements`
+8. Expiry is calculated from the corresponding course or medical validity
+   period when a completion is recorded.
+9. An employee is eligible only when every configured course and medical
+   required by the selected site is current.
+10. An empty Training or Medical domain is neutral. A site with no assigned
+    requirements in either domain shows every employee as `noRequirements`
     and ineligible.
-11. Certificates, providers, approval workflows, waivers, equivalents, grace
-    periods, and temporary access are outside v1.
+11. Certificates, medical providers, results, restrictions, attachments,
+    manual expiry, approval workflows, waivers, equivalents, grace periods,
+    and temporary access are outside v1.
 
-The canonical demo dataset contains eight employees, four sites, twelve
-courses, twelve site-course assignments, and 83 completion records. Its fixed
-June 5, 2026 readiness results are shared by the frontend demo repository and
-server seed.
+The canonical Training demo dataset contains eight employees, four sites,
+twelve courses, twelve site-course assignments, and 83 course completion
+records. Its fixed June 5, 2026 Training readiness results are shared by the
+frontend demo repository and server seed. The Medical catalogue, assignments,
+and completion history start empty in both local seed and frontend demo mode.
 
 ## Domain Model
 
@@ -38,15 +45,28 @@ erDiagram
     COURSE ||--o{ SITE_COURSE_REQUIREMENT : assigned_to
     EMPLOYEE ||--o{ COURSE_COMPLETION : completes
     COURSE ||--o{ COURSE_COMPLETION : records
+    SITE ||--o{ SITE_MEDICAL_REQUIREMENT : requires
+    MEDICAL ||--o{ SITE_MEDICAL_REQUIREMENT : assigned_to
+    EMPLOYEE ||--o{ MEDICAL_COMPLETION : completes
+    MEDICAL ||--o{ MEDICAL_COMPLETION : records
 ```
 
-The production model contains five tables:
+The production model contains eight tables:
 
 1. `employee`
 2. `site`
 3. `course`
 4. `site_course_requirement`
 5. `course_completion`
+6. `medical`
+7. `site_medical_requirement`
+8. `medical_completion`
+
+The three Medical tables mirror the Course catalogue, site assignment, and
+immutable completion rules. They share foreign keys to `employee` and `site`,
+but Course and Medical records never satisfy one another. Medical names are
+permanently unique within the Medical namespace; a Course and Medical may have
+the same name.
 
 No customer, employee-site assignment, audit-event, role, crew, or
 employee-requirement table is needed.
@@ -90,7 +110,8 @@ Active site names are globally unique case-insensitively. The time zone
 determines the default evaluation date when the API receives no `asOf`.
 
 Archiving a site hides it from current readiness views but preserves all
-course assignments. Restoring the site restores those assignments unchanged.
+course and medical assignments. Restoring the site restores both assignment
+sets unchanged.
 
 ### `course`
 
@@ -155,26 +176,101 @@ January 31 plus one month becomes February 28 or 29. The API permanently stores
 both `expires_on` and `validity_months_applied`, so later course changes do not
 rewrite history.
 
+### `medical`
+
+- `id uuid primary key`
+- `name varchar(180) not null`
+- `validity_months smallint not null`
+- `archived_at timestamptz null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+Medical names are permanently unique case-insensitively within the Medical
+catalogue, including after archive. A Medical and Course may use the same name
+because their namespaces are independent. `validity_months` is an integer from
+1 through 120.
+
+Medical creation and editing follows the Course assignment rules. A medical
+may be assigned to active sites or explicitly have `No Site Requirement`; an
+unassigned medical can receive completion records but does not affect site
+access. Archiving preserves assignments and history while removing the medical
+from readiness and new completion entry. Restore reactivates the saved
+assignments.
+
+### `site_medical_requirement`
+
+- `site_id uuid not null references site`
+- `medical_id uuid not null references medical`
+- primary key `(site_id, medical_id)`
+
+This is the Medical domain's current assignment set. Its composite primary key
+rejects duplicate assignments, and changes affect readiness immediately. It
+does not share rows or identifiers with `site_course_requirement`.
+
+### `medical_completion`
+
+- `id uuid primary key`
+- `employee_id uuid not null references employee`
+- `medical_id uuid not null references medical`
+- `completed_on date not null`
+- `expires_on date not null`
+- `validity_months_applied smallint not null`
+- `comment varchar(500) null`
+- `recorded_by_subject varchar(255) not null`
+- `recorded_at timestamptz not null`
+- `voided_at timestamptz null`
+- `voided_by_subject varchar(255) null`
+- `void_reason varchar(500) null`
+
+Medical completions use the same expiry, validity snapshot, all-or-none void
+metadata, immutable history, renewal, comment, and month-end-clamping rules as
+course completions. A partial unique index rejects an identical non-voided
+employee, medical, and completion-date occurrence. Foreign keys to `employee`
+and `medical` are restrictive, and a medical completion can never satisfy a
+course requirement.
+
 ## Readiness
 
-Readiness is derived for an active site and an `asOf` date:
+Readiness is derived for an active site and an `asOf` date from complete,
+unfiltered Training and Medical data:
 
 1. Load every active employee.
-2. Load every course currently assigned to the site.
-3. For each employee and course, select the latest non-voided completion whose
-   completion date is on or before `asOf`.
-4. Classify the requirement:
+2. Load every active course and active medical currently assigned to the site.
+3. For each employee and requirement, select the latest completion from the
+   matching domain whose completion date is on or before `asOf`. Ignore future
+   and voided completions.
+4. Classify each requirement independently:
    - `incomplete`: no applicable completion
    - `overdue`: expiry before `asOf`
    - `expiring`: expiry from `asOf` through `asOf + 45 days`, inclusive
    - `compliant`: expiry after the warning window
-5. Use the worst requirement status as the employee's site status.
-6. Mark the employee eligible only when every requirement is `compliant` or
-   `expiring`.
+5. Build separate Training and Medical summaries. Each top-level status and its
+   required, completed, and expiring counts describe only that response's
+   domain. Status precedence is `overdue`, `incomplete`, `expiring`, then
+   `compliant`; an empty domain is `noRequirements`. `domainEligible` reports
+   whether the visible domain is current.
+6. Build `combinedAccess` from the union of both complete domain evaluations:
+   - `status` is the worst status across both domains
+   - `eligible` is true only when at least one requirement exists and every
+     configured requirement is `compliant` or `expiring`
+   - `requiredCount`, `completedCount`, and `expiringCount` sum both domains
+   - `blockingDomains` lists `training`, `medical`, or both when that domain has
+     an `incomplete` or `overdue` requirement
 
-If the site has no assignments, every active employee is returned with
-`noRequirements` and is ineligible. `asOf=YYYY-MM-DD` is retained for
-deterministic evaluation, not historical requirement configuration.
+The legacy top-level `eligible` field mirrors `combinedAccess.eligible`,
+preserving its site-access meaning for existing Training API consumers. Only
+`combinedAccess` is used to make new site-access decisions.
+
+An empty domain is neutral when the other domain has requirements. If neither
+domain has assignments, every active employee is returned with
+`combinedAccess.status = noRequirements`, zero counts, no blocking domain, and
+`eligible = false`. Filters applied in the Training or Medical workspace alter
+only visible domain rows and never recalculate `combinedAccess`.
+
+The site time zone supplies the default evaluation date. Explicit
+`asOf=YYYY-MM-DD` remains available for deterministic evaluation, not
+historical requirement configuration. Readiness responses expose completion
+and expiry facts but omit comments, recording actors, and void metadata.
 
 ## PostgreSQL Rules
 
@@ -186,20 +282,25 @@ The migration uses:
 - `ON DELETE RESTRICT` for business relationships
 - a partial unique index on `lower(site.name)` for active sites
 - a permanent unique index on `lower(course.name)`
+- a separate permanent unique index on `lower(medical.name)`
 - a permanent unique index on `lower(employee.email)`
-- check constraints for completion expiry and void metadata
-- a partial duplicate-completion index for non-voided rows
+- 1-through-120 validity checks for courses and medicals
+- expiry, validity-snapshot, and all-or-none void-metadata checks for both
+  completion tables
+- separate partial duplicate-completion indexes for non-voided Course and
+  Medical rows
 
 Prisma models map to snake_case table and column names. Unsupported partial
 indexes and checks are maintained in the reviewed migration SQL.
 
 ## Archive Behavior
 
-- Employee archive preserves all completions.
+- Employee archive preserves all Course and Medical completions.
 - Employee archive also prevents temporary-password invitation resend without
   deleting or disabling the Cognito account.
-- Site archive preserves all course assignments.
+- Site archive preserves all Course and Medical assignments.
 - Course archive preserves assignments and suspends them from readiness.
+- Medical archive preserves assignments and suspends them from readiness.
 - Archived records are restored or retained; normal application workflows do
   not physically delete them.
 
@@ -209,10 +310,21 @@ Production should use PostgreSQL 17 on private Amazon RDS subnets with TLS,
 encryption at rest, automated backups, point-in-time recovery, and a security
 group that permits port 5432 only from the API.
 
-Use separate credentials for migrations and the running API. The application
-role needs only connection, schema usage, and DML privileges on the five
-business tables. Store credentials in Secrets Manager and give the API instance
-role access only to the application secret.
+The deployment automation assumes a dedicated `nme_training` database whose
+`public` schema contains only this application's Prisma history and business
+objects. Do not share that schema with another application.
+
+Use separate credentials for migrations and the running API. Bootstrap the
+database and roles outside Prisma, make the migration role the database,
+schema, migration-history, and application-object owner, and leave the runtime
+role as a non-privileged login with database connection, schema usage, and the
+documented per-table/per-column DML allowlist. The runtime role cannot create
+database objects, use temporary tables, update assignment rows, change
+immutable completion facts, delete completion history, or use sequences.
+Store credentials in separate Secrets Manager secrets. Prefer a
+protected CI/CodeBuild migration role as the strong boundary and give the API
+instance role access only to the runtime secret; the same-host migration unit
+is an explicitly weaker operational fallback.
 
 ## Deliberately Excluded
 

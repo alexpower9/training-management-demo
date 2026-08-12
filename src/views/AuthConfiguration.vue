@@ -8,7 +8,7 @@ import { auth } from '@/auth/auth';
       <p class="eyebrow">Configuration required</p>
       <h1>Authentication is not configured</h1>
       <p>
-        This production build requires Amazon Cognito before training data can be displayed.
+        This production build requires Amazon Cognito before compliance data can be displayed.
       </p>
       <code>{{ auth.state.configurationError }}</code>
     </div>

@@ -7,6 +7,7 @@ import { auth } from '@/auth/auth';
     <RouterLink :to="{ name: 'manage-employees' }">Employees</RouterLink>
     <RouterLink :to="{ name: 'manage-sites' }">Sites</RouterLink>
     <RouterLink :to="{ name: 'manage-courses' }">Courses</RouterLink>
+    <RouterLink :to="{ name: 'manage-medicals' }">Medicals</RouterLink>
     <RouterLink :to="{ name: 'manage-completions' }">Completions</RouterLink>
     <RouterLink
       v-if="auth.canAdministerAccounts.value"

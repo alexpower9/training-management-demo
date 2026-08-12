@@ -4,8 +4,11 @@ import demoData from '../../src/data/trainingDemoData.json' with { type: 'json' 
 const prisma = new PrismaClient();
 const recordedAt = new Date('2026-06-05T12:00:00.000Z');
 async function main() {
+  await prisma.medicalCompletion.deleteMany();
+  await prisma.siteMedicalRequirement.deleteMany();
   await prisma.courseCompletion.deleteMany();
   await prisma.siteCourseRequirement.deleteMany();
+  await prisma.medical.deleteMany();
   await prisma.course.deleteMany();
   await prisma.site.deleteMany();
   await prisma.employee.deleteMany();

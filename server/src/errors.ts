@@ -72,7 +72,7 @@ export function registerErrorHandler(app: FastifyInstance) {
       if (error.code === 'P2003') {
         return reply.status(409).send({
           code: 'DEPENDENCY_CONFLICT',
-          message: 'This record is still referenced by other training data.',
+          message: 'This record is still referenced by other compliance data.',
           requestId: request.id,
         });
       }
