@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ArchiveBadge from '@/components/manage/ArchiveBadge.vue';
+import CompletionCommentButton from '@/components/manage/CompletionCommentButton.vue';
 import ConfirmDialog from '@/components/manage/ConfirmDialog.vue';
 import DetailPanel from '@/components/manage/DetailPanel.vue';
 import FormDrawer from '@/components/manage/FormDrawer.vue';
@@ -432,7 +433,13 @@ watch(includeArchived, applySearch);
                 <div class="requirement-status">
                   <ArchiveBadge v-if="completion.voidedAt" archived />
                   <StatusBadge v-else :status="completionStatus(completion)" />
-                  <span>{{ completionExpiryText(completion) }}</span>
+                  <div class="completion-meta-actions">
+                    <span>{{ completionExpiryText(completion) }}</span>
+                    <CompletionCommentButton
+                      :comment="completion.comment"
+                      :label="`View completion comment for ${completion.course.name}`"
+                    />
+                  </div>
                 </div>
               </article>
             </div>

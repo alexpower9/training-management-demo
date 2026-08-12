@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ArchiveBadge from '@/components/manage/ArchiveBadge.vue';
+import CompletionCommentButton from '@/components/manage/CompletionCommentButton.vue';
 import ConfirmDialog from '@/components/manage/ConfirmDialog.vue';
 import DetailPanel from '@/components/manage/DetailPanel.vue';
 import FormDrawer from '@/components/manage/FormDrawer.vue';
@@ -35,6 +36,7 @@ const form = reactive({
   name: '',
   validityMonths: '',
   siteIds: [],
+  noSiteRequirement: false,
 });
 const initialForm = ref('');
 
@@ -57,19 +59,28 @@ const drawerTitle = computed(() =>
 );
 
 function setForm(values = {}) {
+  const siteIds =
+    values.requirements?.map((requirement) => requirement.siteId) ||
+    values.siteIds ||
+    [];
   Object.assign(form, {
     name: values.name || '',
     validityMonths: values.validityMonths ?? '',
-    siteIds:
-      values.requirements?.map((requirement) => requirement.siteId) ||
-      values.siteIds ||
-      [],
+    siteIds,
+    noSiteRequirement:
+      values.noSiteRequirement ?? (Boolean(values.id) && siteIds.length === 0),
   });
   initialForm.value = JSON.stringify(form);
   fieldErrors.value = {};
 }
 
+function toggleNoSiteRequirement(event) {
+  form.noSiteRequirement = event.target.checked;
+  if (form.noSiteRequirement) form.siteIds = [];
+}
+
 function toggleAllSites() {
+  form.noSiteRequirement = false;
   const activeSiteIds = activeSites.value.map((site) => site.id);
   if (allActiveSitesSelected.value) {
     form.siteIds = form.siteIds.filter((siteId) => !activeSiteIds.includes(siteId));
@@ -78,8 +89,28 @@ function toggleAllSites() {
   form.siteIds = [...new Set([...form.siteIds, ...activeSiteIds])];
 }
 
+function onSiteSelectionChange() {
+  if (form.siteIds.length) form.noSiteRequirement = false;
+}
+
+function hasNoSiteRequirement(course) {
+  return !course.requirements?.length;
+}
+
 function assignedSiteNames(course) {
+  if (hasNoSiteRequirement(course)) return 'No Site Requirement';
   return course.requirements.map((requirement) => requirement.site.name).join(', ');
+}
+
+function assignedSiteSummary(course) {
+  if (hasNoSiteRequirement(course)) return 'Does not affect readiness';
+  return `${course.requirements.length} ${course.requirements.length === 1 ? 'site' : 'sites'}`;
+}
+
+function courseDetailSubtitle(course) {
+  if (!course) return 'Select a course to inspect its usage.';
+  if (hasNoSiteRequirement(course)) return 'No site requirement';
+  return `${course.requirements.length} assigned site(s)`;
 }
 
 function syncQuery() {
@@ -156,7 +187,7 @@ async function saveCourse() {
     const payload = {
       name: form.name,
       validityMonths: Number(form.validityMonths),
-      siteIds: form.siteIds,
+      siteIds: form.noSiteRequirement ? [] : form.siteIds,
     };
     const saved =
       formMode.value === 'create'
@@ -259,10 +290,7 @@ watch(includeArchived, applySearch);
                 <td>{{ course.validityMonths }} months</td>
                 <td>
                   <strong>{{ assignedSiteNames(course) }}</strong>
-                  <span>
-                    {{ course.requirements.length }}
-                    {{ course.requirements.length === 1 ? 'site' : 'sites' }}
-                  </span>
+                  <span>{{ assignedSiteSummary(course) }}</span>
                 </td>
                 <td><ArchiveBadge :archived="Boolean(course.archivedAt)" /></td>
               </tr>
@@ -279,7 +307,7 @@ watch(includeArchived, applySearch);
 
       <DetailPanel
         :title="selected?.name || 'Course detail'"
-        :subtitle="selected ? `${selected.requirements.length} assigned site(s)` : 'Select a course to inspect its usage.'"
+        :subtitle="courseDetailSubtitle(selected)"
       >
         <template v-if="selected" #actions>
           <div class="inline-actions">
@@ -305,7 +333,7 @@ watch(includeArchived, applySearch);
 
           <div>
             <h3 class="detail-heading">Required sites</h3>
-            <div class="stack-list">
+            <div v-if="selected.requirements.length" class="stack-list">
               <article
                 v-for="requirement in selected.requirements"
                 :key="`${requirement.siteId}:${requirement.courseId}`"
@@ -316,6 +344,10 @@ watch(includeArchived, applySearch);
                   <span>{{ requirement.site.archivedAt ? 'Archived site' : 'Active site' }}</span>
                 </div>
               </article>
+            </div>
+            <div v-else class="empty-state">
+              <strong>No site requirement</strong>
+              <p>This course can be recorded as a completion, but it does not count toward site readiness.</p>
             </div>
           </div>
 
@@ -331,7 +363,13 @@ watch(includeArchived, applySearch);
                   <strong>{{ completion.employee.displayName }}</strong>
                   <span>Completed {{ formatDate(completion.completedOn) }}</span>
                 </div>
-                <span>Expires {{ formatDate(completion.expiresOn) }}</span>
+                <div class="completion-meta-actions">
+                  <span>Expires {{ formatDate(completion.expiresOn) }}</span>
+                  <CompletionCommentButton
+                    :comment="completion.comment"
+                    :label="`View completion comment for ${completion.employee.displayName}`"
+                  />
+                </div>
               </article>
             </div>
             <div v-else class="empty-state">
@@ -359,6 +397,14 @@ watch(includeArchived, applySearch);
     </label>
     <fieldset class="choice-group site-choice-group">
       <legend>Required sites</legend>
+      <label class="site-select-all no-site-requirement">
+        <input
+          type="checkbox"
+          :checked="form.noSiteRequirement"
+          @change="toggleNoSiteRequirement"
+        />
+        No Site Requirement
+      </label>
       <label v-if="activeSites.length" class="site-select-all">
         <input
           type="checkbox"
@@ -373,6 +419,7 @@ watch(includeArchived, applySearch);
           type="checkbox"
           :value="site.id"
           :disabled="Boolean(site.archivedAt) && !form.siteIds.includes(site.id)"
+          @change="onSiteSelectionChange"
         />
         {{ site.name }}{{ site.archivedAt ? ' (archived)' : '' }}
       </label>

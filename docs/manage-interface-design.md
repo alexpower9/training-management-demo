@@ -139,15 +139,17 @@ The course catalogue shows:
 - assigned-site names and count
 - active or archived state
 
-Course Add/Edit requires a name, one or more sites, and validity in months.
-“Select all” selects the active sites that exist at that time; later sites are
-not automatically added. Course detail shows assigned sites and recent
-employee completion history.
+Course Add/Edit requires a name, validity in months, and either assigned sites
+or `No Site Requirement`. “Select all” selects the active sites that exist at
+that time; later sites are not automatically added. No-site courses can receive
+completion records but do not affect readiness. Course detail shows assigned
+sites or the no-site state, plus recent employee completion history.
 
 Courses do not have a reusable or site-specific flag:
 
 - one assigned site normally represents site-specific training
 - multiple assigned sites represents a shared course
+- no assigned sites represents training tracked outside site readiness
 
 Course names are permanently unique case-insensitively. Archiving preserves
 site assignments while removing the course from readiness and new completion
@@ -160,14 +162,17 @@ Completion entry is optimized for the common workflow:
 1. Choose an employee.
 2. Choose an active course.
 3. Enter the completion date.
-4. Review the automatically calculated expiry.
-5. Save.
+4. Optionally add a short comment.
+5. Review the automatically calculated expiry.
+6. Save.
 
 Calculated expiry previews the course validity period and month-end clamping.
 The saved validity snapshot prevents later course changes from rewriting
 existing completion expiry.
 
 History can be searched and filtered by employee, course, and void state.
+Comments appear in completion detail and can be opened from compact history rows
+without changing the default list layout.
 Completion rows are not edited:
 
 - Renewal opens a new entry prefilled with employee and course.

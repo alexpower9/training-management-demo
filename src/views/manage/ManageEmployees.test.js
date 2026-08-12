@@ -303,6 +303,43 @@ describe('ManageEmployees', () => {
     expect(completionRowText).not.toContain('Active');
   });
 
+  it('opens completion comments from employee history without showing them inline', async () => {
+    mocks.getEmployee.mockResolvedValue({
+      id: 'employee-1',
+      displayName: 'Alex Power',
+      email: 'alex@example.com',
+      archivedAt: null,
+      latestCompletionOn: '2026-01-31',
+      completions: [
+        {
+          id: 'completion-1',
+          course: { id: 'course-1', name: 'Fall Arrest' },
+          completedOn: '2026-01-31',
+          expiresOn: '2027-01-31',
+          comment: 'Certificate verified by site supervisor.',
+          voidedAt: null,
+        },
+      ],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('tbody tr').trigger('click');
+    await flushPromises();
+
+    const rowText = wrapper.get('.requirement-row').text();
+    expect(rowText).toContain('Fall Arrest');
+    expect(rowText).not.toContain('Certificate verified by site supervisor.');
+
+    await wrapper
+      .get('button[aria-label="View completion comment for Fall Arrest"]')
+      .trigger('click');
+
+    expect(wrapper.get('.comment-dialog').text()).toContain(
+      'Certificate verified by site supervisor.',
+    );
+  });
+
   it('shows structured email validation errors', async () => {
     mocks.createEmployee.mockRejectedValue({
       message: 'Invalid employee',

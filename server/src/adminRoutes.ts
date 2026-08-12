@@ -43,7 +43,6 @@ const siteInput = z.object({
 });
 const siteIdsInput = z
   .array(identifier)
-  .min(1, 'Select at least one site.')
   .max(1000)
   .superRefine((siteIds, context) => {
     if (new Set(siteIds).size !== siteIds.length) {
@@ -62,6 +61,12 @@ const completionInput = z.object({
   employeeId: identifier,
   courseId: identifier,
   completedOn: dateOnlyString,
+  comment: z
+    .string()
+    .trim()
+    .max(500)
+    .nullish()
+    .transform((comment) => comment || null),
 });
 const voidInput = z.object({
   reason: z.string().trim().min(3).max(500),
@@ -198,7 +203,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         where,
         include: {
           completions: {
-            where: { voidedAt: null },
+            where: { voidedAt: null, course: { archivedAt: null } },
             select: { completedOn: true },
             orderBy: { completedOn: 'desc' },
             take: 1,
@@ -526,9 +531,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         data: {
           name: data.name,
           validityMonths: data.validityMonths,
-          requirements: {
-            create: data.siteIds.map((siteId) => ({ siteId })),
-          },
+          ...(data.siteIds.length
+            ? {
+                requirements: {
+                  create: data.siteIds.map((siteId) => ({ siteId })),
+                },
+              }
+            : {}),
         },
         include: { requirements: { include: { site: true } } },
       });
@@ -562,12 +571,15 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           siteId: { notIn: data.siteIds },
         },
       });
-      await transaction.siteCourseRequirement.createMany({
-        data: data.siteIds
-          .filter((siteId) => !existingSiteIds.has(siteId))
-          .map((siteId) => ({ siteId, courseId: id })),
-        skipDuplicates: true,
-      });
+      const newSiteIds = data.siteIds.filter(
+        (siteId) => !existingSiteIds.has(siteId),
+      );
+      if (newSiteIds.length) {
+        await transaction.siteCourseRequirement.createMany({
+          data: newSiteIds.map((siteId) => ({ siteId, courseId: id })),
+          skipDuplicates: true,
+        });
+      }
 
       return transaction.course.update({
         where: { id },
@@ -671,6 +683,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         completedOn: parseDateOnly(data.completedOn),
         expiresOn: parseDateOnly(expiresOn),
         validityMonthsApplied,
+        comment: data.comment,
         recordedBySubject: request.auth.subject,
       },
     });

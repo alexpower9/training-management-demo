@@ -66,6 +66,7 @@ model CourseCompletion {
   completedOn           DateTime  @map("completed_on") @db.Date
   expiresOn             DateTime  @map("expires_on") @db.Date
   validityMonthsApplied Int?      @map("validity_months_applied") @db.SmallInt
+  comment               String?   @db.VarChar(500)
   recordedBySubject     String    @map("recorded_by_subject") @db.VarChar(255)
   recordedAt            DateTime  @default(now()) @map("recorded_at") @db.Timestamptz(3)
   voidedAt              DateTime? @map("voided_at") @db.Timestamptz(3)

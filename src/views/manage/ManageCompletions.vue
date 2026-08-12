@@ -36,6 +36,7 @@ const form = reactive({
   employeeId: '',
   courseId: '',
   completedOn: todayDate(),
+  comment: '',
 });
 const initialForm = ref('');
 
@@ -60,8 +61,14 @@ const generalCourses = computed(() => {
     (course) => assignedActiveSiteIds(course).size > 1,
   );
 });
+const noSiteRequirementCourses = computed(() =>
+  courses.value.filter((course) => !course.requirements?.length),
+);
 const siteCourseGroups = computed(() => {
   const generalCourseIds = new Set(generalCourses.value.map((course) => course.id));
+  const noSiteRequirementCourseIds = new Set(
+    noSiteRequirementCourses.value.map((course) => course.id),
+  );
 
   return activeSites.value
     .map((site) => ({
@@ -69,6 +76,7 @@ const siteCourseGroups = computed(() => {
       courses: courses.value.filter(
         (course) =>
           !generalCourseIds.has(course.id) &&
+          !noSiteRequirementCourseIds.has(course.id) &&
           course.requirements?.some((requirement) => requirement.siteId === site.id),
       ),
     }))
@@ -77,6 +85,7 @@ const siteCourseGroups = computed(() => {
 const otherCourses = computed(() => {
   const groupedCourseIds = new Set([
     ...generalCourses.value.map((course) => course.id),
+    ...noSiteRequirementCourses.value.map((course) => course.id),
     ...siteCourseGroups.value.flatMap((group) =>
       group.courses.map((course) => course.id),
     ),
@@ -148,6 +157,7 @@ function resetForm(values = {}) {
     employeeId: values.employeeId || route.query.employeeId || '',
     courseId: values.courseId || '',
     completedOn: values.completedOn || todayDate(),
+    comment: values.comment || '',
   });
   initialForm.value = JSON.stringify(form);
   fieldErrors.value = {};
@@ -175,6 +185,7 @@ async function saveCompletion() {
       employeeId: form.employeeId,
       courseId: form.courseId,
       completedOn: form.completedOn,
+      comment: form.comment.trim() || null,
     };
     const saved = await adminRepository.createCompletion(payload);
     drawerOpen.value = false;
@@ -332,6 +343,10 @@ watch(includeVoided, applySearch);
             <div><strong>{{ formatDate(selected.completedOn) }}</strong><span>Completed</span></div>
             <div><strong>{{ formatDate(selected.expiresOn) }}</strong><span>Expires</span></div>
           </div>
+          <section v-if="selected.comment" class="completion-comment" aria-label="Completion comment">
+            <h3 class="detail-heading">Comment</h3>
+            <p>{{ selected.comment }}</p>
+          </section>
           <dl class="detail-list">
             <div>
               <dt>Validity applied</dt>
@@ -380,6 +395,15 @@ watch(includeVoided, applySearch);
             {{ course.name }}
           </option>
         </optgroup>
+        <optgroup v-if="noSiteRequirementCourses.length" label="No Site Requirement">
+          <option
+            v-for="course in noSiteRequirementCourses"
+            :key="course.id"
+            :value="course.id"
+          >
+            {{ course.name }}
+          </option>
+        </optgroup>
         <optgroup
           v-for="group in siteCourseGroups"
           :key="group.site.id"
@@ -404,6 +428,16 @@ watch(includeVoided, applySearch);
     <label class="field">
       <span>Completed on</span>
       <input v-model="form.completedOn" type="date" required />
+    </label>
+    <label class="field">
+      <span>Comment</span>
+      <textarea
+        v-model="form.comment"
+        maxlength="500"
+        rows="4"
+        placeholder="Optional"
+      />
+      <small v-if="fieldErrors.comment" class="field-error">{{ fieldErrors.comment[0] }}</small>
     </label>
     <div class="calculation-preview">
       <strong v-if="calculatedExpiry">Expires {{ formatDate(calculatedExpiry) }}</strong>

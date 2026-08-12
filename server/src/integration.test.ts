@@ -201,12 +201,26 @@ test(
         [site.id, secondSite.id].sort(),
       );
 
-      const emptySitesResponse = await request('POST', '/api/v1/admin/courses', {
+      const noSiteCourseResponse = await request('POST', '/api/v1/admin/courses', {
         name: 'No Site Course',
         validityMonths: 12,
         siteIds: [],
       });
-      assert.equal(emptySitesResponse.statusCode, 400);
+      assert.equal(noSiteCourseResponse.statusCode, 201);
+      const noSiteCourse = noSiteCourseResponse.json();
+      assert.deepEqual(noSiteCourse.requirements, []);
+
+      const siteCoursesAfterNoSiteCourse = await request(
+        'GET',
+        `/api/v1/sites/${site.id}/courses`,
+      );
+      assert.equal(siteCoursesAfterNoSiteCourse.statusCode, 200);
+      assert.equal(
+        siteCoursesAfterNoSiteCourse
+          .json()
+          .some((siteCourse: { id: string }) => siteCourse.id === noSiteCourse.id),
+        false,
+      );
 
       const invalidValidityResponse = await request('POST', '/api/v1/admin/courses', {
         name: 'Invalid Validity Course',
@@ -230,6 +244,28 @@ test(
       assert.equal(courseResponse.statusCode, 201);
       const course = courseResponse.json();
       assert.equal(course.requirements.length, 2);
+
+      const siteAssignedCourseResponse = await request(
+        'POST',
+        '/api/v1/admin/courses',
+        {
+          name: 'Site Assigned Then General',
+          validityMonths: 12,
+          siteIds: [site.id],
+        },
+      );
+      assert.equal(siteAssignedCourseResponse.statusCode, 201);
+      const noSiteUpdateResponse = await request(
+        'PATCH',
+        `/api/v1/admin/courses/${siteAssignedCourseResponse.json().id}`,
+        {
+          name: 'Site Assigned Then General',
+          validityMonths: 12,
+          siteIds: [],
+        },
+      );
+      assert.equal(noSiteUpdateResponse.statusCode, 200);
+      assert.deepEqual(noSiteUpdateResponse.json().requirements, []);
 
       const duplicateCourseResponse = await request('POST', '/api/v1/admin/courses', {
         name: 'calendar month safety',
@@ -261,16 +297,25 @@ test(
         employeeId: employee.id,
         courseId: course.id,
         completedOn: '2024-01-31',
+        comment: 'Certificate uploaded to shared drive.',
       });
       assert.equal(completionResponse.statusCode, 201);
       assert.equal(completionResponse.json().expiresOn, '2024-02-29');
       assert.equal(completionResponse.json().validityMonthsApplied, 1);
+      assert.equal(
+        completionResponse.json().comment,
+        'Certificate uploaded to shared drive.',
+      );
 
       const adminCompletionList = await request(
         'GET',
         `/api/v1/admin/completions?employeeId=${employee.id}`,
       );
       assert.equal(adminCompletionList.statusCode, 200);
+      assert.equal(
+        adminCompletionList.json().items[0].comment,
+        'Certificate uploaded to shared drive.',
+      );
       assert.equal(
         JSON.stringify(adminCompletionList.json()).includes('cognitoSubject'),
         false,
@@ -281,6 +326,10 @@ test(
       );
       assert.equal(completionList.statusCode, 200);
       assert.equal(
+        completionList.json()[0].comment,
+        'Certificate uploaded to shared drive.',
+      );
+      assert.equal(
         JSON.stringify(completionList.json()).includes('cognitoSubject'),
         false,
       );
@@ -289,9 +338,41 @@ test(
         `/api/v1/admin/courses/${course.id}`,
       );
       assert.equal(
+        courseDetailWithCompletion.json().completions[0].comment,
+        'Certificate uploaded to shared drive.',
+      );
+      assert.equal(
         JSON.stringify(courseDetailWithCompletion.json()).includes('cognitoSubject'),
         false,
       );
+
+      const blankCommentResponse = await request(
+        'POST',
+        '/api/v1/admin/completions',
+        {
+          employeeId: employee.id,
+          courseId: course.id,
+          completedOn: '2024-02-01',
+          comment: '   ',
+        },
+      );
+      assert.equal(blankCommentResponse.statusCode, 201);
+      assert.equal(blankCommentResponse.json().comment, null);
+
+      const longCommentResponse = await request(
+        'POST',
+        '/api/v1/admin/completions',
+        {
+          employeeId: employee.id,
+          courseId: course.id,
+          completedOn: '2024-02-02',
+          comment: 'x'.repeat(501),
+        },
+      );
+      assert.equal(longCommentResponse.statusCode, 400);
+      assert.deepEqual(longCommentResponse.json().fieldErrors.comment, [
+        'String must contain at most 500 character(s)',
+      ]);
 
       const duplicateCompletionResponse = await request(
         'POST',
@@ -327,6 +408,10 @@ test(
       });
       assert.equal(storedCompletion?.expiresOn.toISOString().slice(0, 10), '2024-02-29');
       assert.equal(storedCompletion?.validityMonthsApplied, 1);
+      assert.equal(
+        storedCompletion?.comment,
+        'Certificate uploaded to shared drive.',
+      );
 
       const expiringEmployee = await prisma.employee.create({
         data: {
@@ -386,6 +471,7 @@ test(
       const readiness = readinessResponse.json();
       assert.equal(JSON.stringify(readiness).includes('recordedBySubject'), false);
       assert.equal(JSON.stringify(readiness).includes('voidedBySubject'), false);
+      assert.equal(JSON.stringify(readiness).includes(noSiteCourse.id), false);
       assert.deepEqual(
         readiness.map((row: { status: string }) => row.status).sort(),
         ['compliant', 'expiring', 'incomplete', 'overdue'].sort(),
@@ -427,6 +513,7 @@ test(
       );
       assert.equal(JSON.stringify(selfReadiness).includes('recordedBySubject'), false);
       assert.equal(JSON.stringify(selfReadiness).includes('voidedBySubject'), false);
+      assert.equal(JSON.stringify(selfReadiness).includes('comment'), false);
 
       for (const url of [
         '/api/v1/employees',
@@ -525,6 +612,31 @@ test(
           .json()
           .requirements.map((requirement: { siteId: string }) => requirement.siteId),
         [site.id],
+      );
+
+      const employeeDetailAfterCourseArchive = await request(
+        'GET',
+        `/api/v1/admin/employees/${employee.id}`,
+      );
+      assert.equal(employeeDetailAfterCourseArchive.statusCode, 200);
+      assert.equal(
+        employeeDetailAfterCourseArchive
+          .json()
+          .completions.some(
+            (completion: { course: { id: string } }) =>
+              completion.course.id === course.id,
+          ),
+        false,
+      );
+
+      const employeeListAfterCourseArchive = await request(
+        'GET',
+        '/api/v1/admin/employees?search=Overdue%20Employee',
+      );
+      assert.equal(employeeListAfterCourseArchive.statusCode, 200);
+      assert.equal(
+        employeeListAfterCourseArchive.json().items[0].latestCompletionOn,
+        null,
       );
 
       const siteListAfterCourseArchive = await request(

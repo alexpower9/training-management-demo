@@ -78,6 +78,12 @@ describe('ManageCompletions', () => {
           requirements: [{ siteId: 'site-1', site: sites[0] }],
         },
         {
+          id: 'course-no-site',
+          name: 'General Safety Awareness',
+          validityMonths: 12,
+          requirements: [],
+        },
+        {
           id: 'course-north',
           name: 'North Ridge Orientation',
           validityMonths: 12,
@@ -100,14 +106,16 @@ describe('ManageCompletions', () => {
     const groups = wrapper.findAll('.form-drawer select')[1].findAll('optgroup');
     expect(groups.map((group) => group.attributes('label'))).toEqual([
       'General courses',
+      'No Site Requirement',
       'East Pit',
       'North Ridge',
     ]);
     expect(groups[0].text()).toContain('First Aid');
-    expect(groups[1].text()).toContain('East Pit Orientation');
-    expect(groups[2].text()).toContain('North Ridge Orientation');
-    expect(groups[1].text()).not.toContain('First Aid');
+    expect(groups[1].text()).toContain('General Safety Awareness');
+    expect(groups[2].text()).toContain('East Pit Orientation');
+    expect(groups[3].text()).toContain('North Ridge Orientation');
     expect(groups[2].text()).not.toContain('First Aid');
+    expect(groups[3].text()).not.toContain('First Aid');
     expect(
       wrapper
         .findAll('.form-drawer select')[1]
@@ -131,6 +139,7 @@ describe('ManageCompletions', () => {
     expect(selects[0].element.value).toBe('employee-1');
     await selects[1].setValue('course-1');
     await wrapper.get('.form-drawer input[type="date"]').setValue('2026-01-31');
+    await wrapper.get('.form-drawer textarea').setValue('Manager note');
 
     expect(wrapper.get('.calculation-preview').text()).toContain('Feb 28, 2026');
     await wrapper.get('.drawer-form').trigger('submit');
@@ -140,7 +149,42 @@ describe('ManageCompletions', () => {
       employeeId: 'employee-1',
       courseId: 'course-1',
       completedOn: '2026-01-31',
+      comment: 'Manager note',
     });
+  });
+
+  it('shows saved comments in the completion detail panel', async () => {
+    mocks.listCompletions.mockResolvedValue({
+      items: [
+        {
+          id: 'completion-commented',
+          employeeId: 'employee-1',
+          courseId: 'course-1',
+          employee: { displayName: 'Alex Power' },
+          course: { name: 'First Aid' },
+          completedOn: '2026-01-31',
+          expiresOn: '2026-02-28',
+          comment: 'Certificate uploaded to shared drive.',
+          voidedAt: null,
+        },
+      ],
+      total: 1,
+    });
+    const wrapper = mount(ManageCompletions, {
+      global: {
+        stubs: {
+          Teleport: true,
+          RouterLink: true,
+        },
+      },
+    });
+    await flushPromises();
+
+    await wrapper.get('tbody tr').trigger('click');
+
+    expect(wrapper.get('[aria-label="Completion comment"]').text()).toContain(
+      'Certificate uploaded to shared drive.',
+    );
   });
 
   it('marks expired non-voided completions as overdue instead of current', async () => {
