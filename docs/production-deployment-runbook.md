@@ -207,6 +207,10 @@ Attach an IAM role to EC2 through an instance profile. Grant only:
 Do not store AWS access keys on EC2. The AWS SDK automatically uses the
 instance-role credentials.
 
+Employee account-state lookup and invitation resend use the existing
+`ListUsersInGroup` and `AdminCreateUser` permissions. They require no additional
+IAM actions or direct Amazon SES permission.
+
 The API reads `DATABASE_SECRET_ARN` at startup. After a database-secret
 rotation, restart the API service so it creates a new pool with the current
 credentials.
@@ -246,17 +250,22 @@ Recommended settings:
 
 1. Disable public self-registration for this internal application.
 2. Choose the required sign-in identifier, normally email.
-3. Require a strong password policy.
-4. Enable MFA according to company policy; MFA is strongly recommended for
+3. Keep password sign-in enabled and do not enable passwordless email or SMS
+   one-time-password sign-in. The API relies on Cognito generating a temporary
+   password for each administrator-created user.
+4. Require a strong password policy and explicitly set **Temporary passwords
+   set by administrators expire in**, for example to 7 days. Record the chosen
+   value in the production configuration inventory.
+5. Enable MFA according to company policy; MFA is strongly recommended for
    administrators.
-5. Create a Cognito managed-login domain.
-6. Create a public browser app client with no client secret.
-7. Enable only the authorization-code OAuth grant.
-8. Enable PKCE.
-9. Allow scopes `openid`, `profile`, and `email`.
-10. Register the exact callback URL:
+6. Create a Cognito managed-login domain.
+7. Create a public browser app client with no client secret.
+8. Enable only the authorization-code OAuth grant.
+9. Enable PKCE.
+10. Allow scopes `openid`, `profile`, and `email`.
+11. Register the exact callback URL:
     `https://training.your-company-domain.com/auth/callback`.
-11. Register the exact sign-out URL:
+12. Register the exact sign-out URL:
     `https://training.your-company-domain.com/training`.
 
 Create these user-pool groups:
@@ -281,6 +290,35 @@ the standard temporary-password email. Email and display name are not
 authorization keys, and Cognito subjects are never returned by management API
 responses. An archived employee remains denied until restored.
 
+Every employee database row is initially created with a Cognito account. Manage
+Employees loads the live `employee` group and matches accounts to employee rows by
+immutable `sub`. `FORCE_CHANGE_PASSWORD` means the invitation is pending;
+`CONFIRMED` means setup is complete, but does not prove that the employee has
+used the application. If Cognito account lookup fails, employee records remain
+manageable and their account status is reported as unavailable.
+
+Administrators and owners can resend an invitation only for an active employee
+whose Cognito account is enabled and still in `FORCE_CHANGE_PASSWORD`. Cognito's
+`RESEND` operation generates and emails a new temporary password, restarts the
+temporary-password validity period, and supersedes the old password. Archived,
+disabled, confirmed, missing, email-mismatched, and otherwise ineligible accounts
+are rejected. The API coalesces concurrent requests in the running process and
+applies a short resend-attempt cooldown. The feature stores no password or
+account-status snapshot, requires no database migration, and calls Cognito rather
+than Amazon SES directly.
+
+The current small-workforce implementation enumerates the paginated `employee`
+group for each employee list, detail, and resend eligibility check. If the pool
+grows enough for this to affect latency or Cognito quotas, add a bounded status
+cache or a dedicated reconciliation design before scaling the API horizontally.
+
+Account mismatch states require operator investigation; the application has no
+manual relink endpoint. For `missing`, first check whether the account with the
+stored subject still exists but was removed from the `employee` group, and restore
+that membership if appropriate. For `disabled`, confirm the reason before enabling
+the account. A deleted account or changed email requires a controlled data-repair
+incident; do not create a replacement and assume its new `sub` will link itself.
+
 The owner can invite administrators from Manage Administrators. The API uses
 its EC2 role to call Cognito, creates the user, and adds it only to the
 hardcoded `admin` group. There is no API operation that can create another
@@ -296,9 +334,9 @@ Username: {username}
 Temporary password: {####}
 ```
 
-Cognito rejects an invitation template that omits `{####}`. Keep the
-application sign-in URL environment-specific and verify delivery in staging
-for both employee and administrator invitations.
+Cognito does not deliver a password-based invitation when its template omits
+`{####}`. Keep the application sign-in URL environment-specific and verify
+delivery in staging for both employee and administrator invitations.
 
 Do not use Cognito's default email configuration for normal production
 delivery. It has a non-adjustable quota of 50 messages per AWS account per day,
@@ -307,6 +345,11 @@ In the user pool's email configuration, select **Send email from Amazon SES**,
 use a verified sender identity, and move that SES Region out of the sandbox
 before inviting production users. SES then supplies the applicable sending
 quota and delivery monitoring.
+
+Monitor SES sending quota, bounces, complaints, and delivery metrics separately
+in AWS. The application does not receive message-open events, and neither SES
+delivery nor Cognito `CONFIRMED` status proves that an employee has used the
+application.
 
 For pre-production testing, add localhost callback and sign-out URLs only to a
 separate non-production app client.
@@ -554,19 +597,22 @@ Validate:
 1. Linked employee login succeeds, shows only that employee, and `/manage` is rejected.
 2. Administrator login succeeds.
 3. Employee create, edit, archive, and restore work.
-4. Site archive and restore preserve course assignments.
-5. Course create and edit atomically replace site assignments.
-6. Completion expiry is calculated from course validity.
-7. January 31 expiry clamps correctly in February.
-8. Renewal and void workflows work.
-9. Course archive and restore preserve and suspend site assignments.
-10. Expired access tokens return `401`.
-11. Employee broad-read and mutation requests return `403`.
-12. The browser never receives database credentials.
-13. RDS is not publicly reachable.
-14. The API is not reachable directly on port 3000.
-15. A backup can be restored into a separate RDS instance.
-16. A previous application release can be redeployed.
+4. Pending active employees show Invitation pending and can receive a replacement invitation.
+5. Confirmed, disabled, missing, mismatched, and archived employee accounts cannot resend invitations.
+6. A Cognito lookup failure shows account status as unavailable without hiding employee records.
+7. Site archive and restore preserve course assignments.
+8. Course create and edit atomically replace site assignments.
+9. Completion expiry is calculated from course validity.
+10. January 31 expiry clamps correctly in February.
+11. Renewal and void workflows work.
+12. Course archive and restore preserve and suspend site assignments.
+13. Expired access tokens return `401`.
+14. Employee broad-read and mutation requests return `403`.
+15. The browser never receives database credentials or temporary passwords.
+16. RDS is not publicly reachable.
+17. The API is not reachable directly on port 3000.
+18. A backup can be restored into a separate RDS instance.
+19. A previous application release can be redeployed.
 
 ## 15. Monitoring And Alerts
 

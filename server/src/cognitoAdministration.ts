@@ -36,6 +36,10 @@ export type ProvisionedAccount = AdminAccount & {
   subject: string;
 };
 
+export type EmployeeAccount = ProvisionedAccount & {
+  resendCooldownActive: boolean;
+};
+
 export type AccountInvitation = {
   email: string;
   displayName?: string;
@@ -54,6 +58,8 @@ type AdministrationOptions = {
   send?: CognitoSend | null;
   poolId?: string;
   developmentAccounts?: Map<string, DevelopmentAccount>;
+  now?: () => number;
+  resendCooldownMs?: number;
 };
 
 function attribute(user: UserType, name: string) {
@@ -90,7 +96,7 @@ function accountExistsError(kind: AccountKind) {
 function cognitoError(
   error: unknown,
   kind: AccountKind,
-  phase: 'provisioning' | 'delivery',
+  phase: 'provisioning' | 'delivery' | 'lookup',
 ) {
   if (error instanceof AppError) return error;
 
@@ -115,7 +121,7 @@ function cognitoError(
       return appError(
         503,
         `${prefix}_INVITATION_EMAIL_QUOTA_EXCEEDED`,
-        "Cognito's daily email limit has been reached. Try again after 09:00 UTC or configure Amazon SES for production email delivery.",
+        'The invitation email sending limit has been reached. Try again later.',
       );
     }
     return appError(
@@ -131,7 +137,28 @@ function cognitoError(
       'Cognito is temporarily rate limited. Try again shortly.',
     );
   }
+  if (name === 'ResourceNotFoundException') {
+    return appError(
+      502,
+      'COGNITO_USER_POOL_NOT_FOUND',
+      'The configured Cognito user pool could not be found.',
+    );
+  }
   if (name === 'NotAuthorizedException' || name === 'AccessDeniedException') {
+    if (phase === 'lookup') {
+      return appError(
+        502,
+        `${prefix}_ACCOUNT_LOOKUP_NOT_AUTHORIZED`,
+        'The API is not permitted to read Cognito users.',
+      );
+    }
+    if (phase === 'delivery') {
+      return appError(
+        502,
+        `${prefix}_INVITATION_DELIVERY_NOT_AUTHORIZED`,
+        'The API is not permitted to send Cognito invitations.',
+      );
+    }
     return appError(
       502,
       `${prefix}_ACCOUNT_PROVISIONING_NOT_AUTHORIZED`,
@@ -145,7 +172,35 @@ function cognitoError(
       'Cognito email delivery is not configured correctly.',
     );
   }
+  if (phase === 'delivery' && name === 'UnsupportedUserStateException') {
+    return appError(
+      409,
+      `${prefix}_INVITATION_NOT_PENDING`,
+      `The ${label} has already completed account setup or is not eligible for another invitation.`,
+    );
+  }
+  if (phase === 'delivery' && name === 'UserNotFoundException') {
+    return appError(
+      409,
+      `${prefix}_ACCOUNT_MISSING`,
+      `The ${label}'s Cognito account could not be found.`,
+    );
+  }
   if (name === 'InvalidParameterException' || name === 'InvalidPasswordException') {
+    if (phase === 'lookup') {
+      return appError(
+        502,
+        `${prefix}_ACCOUNT_LOOKUP_FAILED`,
+        `Cognito could not load ${label} account status.`,
+      );
+    }
+    if (phase === 'delivery') {
+      return appError(
+        400,
+        `${prefix}_INVITATION_INVALID`,
+        `Cognito rejected the ${label} invitation.`,
+      );
+    }
     return appError(
       400,
       `${prefix}_ACCOUNT_PROVISIONING_INVALID`,
@@ -157,6 +212,13 @@ function cognitoError(
       502,
       `${prefix}_INVITATION_DELIVERY_FAILED`,
       `Cognito could not deliver the ${label} invitation.`,
+    );
+  }
+  if (phase === 'lookup') {
+    return appError(
+      502,
+      `${prefix}_ACCOUNT_LOOKUP_FAILED`,
+      `Cognito could not load ${label} account status.`,
     );
   }
   return appError(
@@ -179,6 +241,30 @@ export function createCognitoAdministration(options: AdministrationOptions = {})
   const send = options.send || null;
   const developmentAccounts =
     options.developmentAccounts || new Map<string, DevelopmentAccount>();
+  const now = options.now || Date.now;
+  const resendCooldownMs = options.resendCooldownMs ?? 30_000;
+  const employeeResendsInFlight = new Map<string, Promise<EmployeeAccount>>();
+  const employeeLastResendAttemptAt = new Map<string, number>();
+
+  function clearExpiredEmployeeResendAttempts(requestedAt: number) {
+    for (const [candidateSubject, attemptedAt] of employeeLastResendAttemptAt) {
+      if (requestedAt - attemptedAt >= resendCooldownMs) {
+        employeeLastResendAttemptAt.delete(candidateSubject);
+      }
+    }
+  }
+
+  function withEmployeeResendState(
+    accounts: ProvisionedAccount[],
+  ): EmployeeAccount[] {
+    clearExpiredEmployeeResendAttempts(now());
+    return accounts.map((account) => ({
+      ...account,
+      resendCooldownActive:
+        employeeResendsInFlight.has(account.subject) ||
+        employeeLastResendAttemptAt.has(account.subject),
+    }));
+  }
 
   function userPoolId() {
     if (!options.poolId) {
@@ -305,6 +391,127 @@ export function createCognitoAdministration(options: AdministrationOptions = {})
     }
   }
 
+  async function listCognitoGroupUsers(groupName: string) {
+    const users: UserType[] = [];
+    let nextToken: string | undefined;
+    do {
+      const response = (await send!(
+        new ListUsersInGroupCommand({
+          UserPoolId: userPoolId(),
+          GroupName: groupName,
+          NextToken: nextToken,
+        }),
+      )) as ListUsersInGroupCommandOutput;
+      users.push(...(response.Users || []));
+      nextToken = response.NextToken;
+    } while (nextToken);
+    return users;
+  }
+
+  async function listEmployeeAccounts(): Promise<EmployeeAccount[]> {
+    if (!send) {
+      return withEmployeeResendState(
+        Array.from(developmentAccounts.values())
+          .filter((account) => account.groups.has(employeeGroupName))
+          .map(({ groups: _groups, ...account }) => account),
+      );
+    }
+
+    try {
+      return withEmployeeResendState(
+        (await listCognitoGroupUsers(employeeGroupName)).map((user) => {
+          const subject = attribute(user, 'sub');
+          if (!subject) {
+            throw new AppError(
+              502,
+              'EMPLOYEE_ACCOUNT_LOOKUP_FAILED',
+              'Cognito returned an employee account without its immutable subject.',
+            );
+          }
+          return {
+            ...serializeUser(user),
+            subject,
+          };
+        }),
+      );
+    } catch (error) {
+      throw cognitoError(error, 'employee', 'lookup');
+    }
+  }
+
+  function resendEmployeeInvitation(
+    subject: string,
+    expectedEmail: string,
+  ): Promise<EmployeeAccount> {
+    const inFlight = employeeResendsInFlight.get(subject);
+    if (inFlight) return inFlight;
+
+    const requestedAt = now();
+    clearExpiredEmployeeResendAttempts(requestedAt);
+    const lastResendAttemptAt = employeeLastResendAttemptAt.get(subject);
+    if (
+      lastResendAttemptAt !== undefined &&
+      requestedAt - lastResendAttemptAt < resendCooldownMs
+    ) {
+      return Promise.reject(
+        new AppError(
+          429,
+          'EMPLOYEE_INVITATION_RECENTLY_ATTEMPTED',
+          'An invitation resend was attempted recently. Wait a moment before trying again.',
+        ),
+      );
+    }
+
+    const operation = (async () => {
+      const account = (await listEmployeeAccounts()).find(
+        (candidate) => candidate.subject === subject,
+      );
+      if (!account) {
+        throw new AppError(
+          409,
+          'EMPLOYEE_ACCOUNT_MISSING',
+          "The employee's Cognito account is missing or is not in the employee group.",
+        );
+      }
+      if (account.email.toLowerCase() !== expectedEmail.toLowerCase()) {
+        throw new AppError(
+          409,
+          'EMPLOYEE_ACCOUNT_EMAIL_MISMATCH',
+          "The employee record email does not match the linked Cognito account.",
+        );
+      }
+      if (!account.enabled) {
+        throw new AppError(
+          409,
+          'EMPLOYEE_ACCOUNT_DISABLED',
+          "The employee's Cognito account is disabled.",
+        );
+      }
+      if (account.status !== 'FORCE_CHANGE_PASSWORD') {
+        throw new AppError(
+          409,
+          'EMPLOYEE_INVITATION_NOT_PENDING',
+          'The employee has already completed account setup or is not eligible for another invitation.',
+        );
+      }
+
+      // Treat any delivery attempt as potentially successful. A response can be
+      // lost after Cognito has already generated and emailed a new password.
+      employeeLastResendAttemptAt.set(subject, now());
+      await resendInvitation(account, 'employee');
+      employeeLastResendAttemptAt.set(subject, now());
+      return { ...account, resendCooldownActive: true };
+    })();
+    let trackedOperation: Promise<EmployeeAccount>;
+    trackedOperation = operation.finally(() => {
+      if (employeeResendsInFlight.get(subject) === trackedOperation) {
+        employeeResendsInFlight.delete(subject);
+      }
+    });
+    employeeResendsInFlight.set(subject, trackedOperation);
+    return trackedOperation;
+  }
+
   async function provisionAccount<T>(
     invitation: AccountInvitation,
     kind: AccountKind,
@@ -372,29 +579,18 @@ export function createCognitoAdministration(options: AdministrationOptions = {})
       }
 
       try {
-        const users: UserType[] = [];
-        let nextToken: string | undefined;
-        do {
-          const response = (await send(
-            new ListUsersInGroupCommand({
-              UserPoolId: userPoolId(),
-              GroupName: adminGroupName,
-              NextToken: nextToken,
-            }),
-          )) as ListUsersInGroupCommandOutput;
-          users.push(...(response.Users || []));
-          nextToken = response.NextToken;
-        } while (nextToken);
-
-        return users
+        return (await listCognitoGroupUsers(adminGroupName))
           .map(serializeUser)
           .sort((a, b) =>
             (a.displayName || a.email).localeCompare(b.displayName || b.email),
           );
       } catch (error) {
-        throw cognitoError(error, 'administrator', 'provisioning');
+        throw cognitoError(error, 'administrator', 'lookup');
       }
     },
+
+    listEmployeeAccounts,
+    resendEmployeeInvitation,
 
     inviteAdminAccount(
       invitation: AccountInvitation,
@@ -445,5 +641,8 @@ const administration = createCognitoAdministration({
 
 export const listAdminAccounts = administration.listAdminAccounts;
 export const inviteAdminAccount = administration.inviteAdminAccount;
+export const listEmployeeAccounts = administration.listEmployeeAccounts;
+export const resendEmployeeInvitation =
+  administration.resendEmployeeInvitation;
 export const provisionEmployeeAccount =
   administration.provisionEmployeeAccount;

@@ -87,10 +87,27 @@ readiness, completion history, and record-management operations.
 Adding an employee requires a display name and email. Administrators and owners create the
 employee's Cognito account, assign it only to the `employee` group, send Cognito's
 temporary-password invitation, and store the immutable Cognito `sub` on the employee record.
-Cognito subjects are never returned by employee-management API responses. The owner can also
-invite new administrators from Manage Administrators. Active employees can access only
-`/api/v1/me/readiness`, which returns their own readiness across active sites. Unlinked or archived
-employee identities are denied without receiving training data.
+Every employee row is initially created with a Cognito account. Manage Employees reads account
+setup state live from the `employee` group and matches it by `sub`; Cognito subjects are never
+returned by employee-management API responses. `FORCE_CHANGE_PASSWORD` means the invitation is
+pending, while `CONFIRMED` means account setup is complete, not that the employee has used the
+application.
+
+Administrators and owners can resend an invitation for an active employee whose invitation is
+pending. Cognito generates a new temporary password, restarts its validity period, and supersedes
+the previous temporary password. The API coalesces concurrent requests and applies a short resend
+attempt cooldown. Archived employees and disabled, confirmed, missing, mismatched, or
+otherwise ineligible accounts cannot be resent. If the Cognito group lookup fails, employee records
+remain available with account status shown as unavailable. The API calls Cognito for invitation
+delivery; it does not call Amazon SES directly.
+
+Development authentication emulates newly created Cognito accounts only in the running API
+process. Seeded employees show Status unavailable, and restarting the API clears locally emulated
+account status and resend eligibility. Production Cognito state is not affected.
+
+The owner can also invite new administrators from Manage Administrators. Active employees can
+access only `/api/v1/me/readiness`, which returns their own readiness across active sites. Missing,
+unmatched, or archived employee identities are denied without receiving training data.
 
 For local employee mode, use:
 

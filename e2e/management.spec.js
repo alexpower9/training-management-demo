@@ -30,7 +30,15 @@ test.describe.serial('training management smoke tests', () => {
 
     await expect(page.getByText('Employee added and invitation sent.')).toBeVisible();
     await expect(page.getByText(employeeEmail, { exact: true }).first()).toBeVisible();
-    await page.locator('tbody').getByText(employeeName, { exact: true }).click();
+    const employeeRow = page.locator('tbody tr').filter({ hasText: employeeName });
+    await expect(employeeRow.getByText('Invitation pending')).toBeVisible();
+    await employeeRow.click();
+    await page.getByRole('button', { name: 'Resend invitation' }).click();
+    await page
+      .getByRole('alertdialog')
+      .getByRole('button', { name: 'Resend invitation' })
+      .click();
+    await expect(page.getByText('Employee invitation resent.')).toBeVisible();
     await page.getByRole('button', { name: 'Archive' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Archive' }).click();
     await expect(page.getByText('Employee archived.')).toBeVisible();

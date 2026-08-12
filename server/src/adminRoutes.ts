@@ -1,8 +1,14 @@
 import { Prisma } from '@prisma/client';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { authenticate, requireAdmin } from './auth.js';
-import { provisionEmployeeAccount } from './cognitoAdministration.js';
+import {
+  listEmployeeAccounts,
+  provisionEmployeeAccount,
+  resendEmployeeInvitation,
+  type EmployeeAccount,
+} from './cognitoAdministration.js';
+import { config } from './config.js';
 import { getPrisma } from './database.js';
 import {
   addCalendarMonths,
@@ -86,6 +92,59 @@ function employeeEmailExistsError() {
   );
 }
 
+type EmployeeAccountStatus =
+  | 'invitationPending'
+  | 'confirmed'
+  | 'passwordResetRequired'
+  | 'disabled'
+  | 'misconfigured'
+  | 'missing'
+  | 'unknown';
+
+async function loadEmployeeAccountIndex(request: FastifyRequest) {
+  try {
+    return new Map(
+      (await listEmployeeAccounts()).map((account) => [account.subject, account]),
+    );
+  } catch (error) {
+    request.log.error(
+      { err: error },
+      'Could not load employee account status from Cognito.',
+    );
+    return null;
+  }
+}
+
+function publicEmployeeAccount(
+  account: EmployeeAccount | undefined,
+  employeeEmail: string,
+  archived: boolean,
+  lookupAvailable = true,
+) {
+  let status: EmployeeAccountStatus;
+  if (!lookupAvailable) status = 'unknown';
+  else if (!account) {
+    status = config.authMode === 'development' ? 'unknown' : 'missing';
+  }
+  else if (account.email.toLowerCase() !== employeeEmail.toLowerCase()) {
+    status = 'misconfigured';
+  }
+  else if (!account.enabled) status = 'disabled';
+  else if (account.status === 'FORCE_CHANGE_PASSWORD') status = 'invitationPending';
+  else if (account.status === 'CONFIRMED') status = 'confirmed';
+  else if (account.status === 'RESET_REQUIRED') status = 'passwordResetRequired';
+  else status = 'unknown';
+
+  return {
+    status,
+    canResendInvitation:
+      !archived &&
+      status === 'invitationPending' &&
+      Boolean(account?.email) &&
+      account?.resendCooldownActive !== true,
+  };
+}
+
 async function validateCourseSiteSelection(
   transaction: Prisma.TransactionClient,
   siteIds: string[],
@@ -134,7 +193,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           }
         : {}),
     };
-    const [items, total] = await Promise.all([
+    const [items, total, accounts] = await Promise.all([
       prisma.employee.findMany({
         where,
         include: {
@@ -150,10 +209,17 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         take: query.pageSize,
       }),
       prisma.employee.count({ where }),
+      loadEmployeeAccountIndex(request),
     ]);
     return pageResult(
       items.map((item) => ({
         ...publicEmployeeRecord(item),
+        account: publicEmployeeAccount(
+          accounts?.get(item.cognitoSubject),
+          item.email,
+          Boolean(item.archivedAt),
+          accounts !== null,
+        ),
         latestCompletionOn: item.completions[0]
           ? formatDateOnly(item.completions[0].completedOn)
           : null,
@@ -166,19 +232,28 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/v1/admin/employees/:id', admin, async (request) => {
-    const employee = await (await getPrisma()).employee.findUnique({
-      where: { id: parseId(request) },
-      include: {
-        completions: {
-          include: { course: true },
-          orderBy: [{ completedOn: 'desc' }, { recordedAt: 'desc' }],
+    const [employee, accounts] = await Promise.all([
+      (await getPrisma()).employee.findUnique({
+        where: { id: parseId(request) },
+        include: {
+          completions: {
+            include: { course: true },
+            orderBy: [{ completedOn: 'desc' }, { recordedAt: 'desc' }],
+          },
         },
-      },
-    });
+      }),
+      loadEmployeeAccountIndex(request),
+    ]);
     ensureFound(employee, 'EMPLOYEE_NOT_FOUND', 'The employee was not found.');
     const publicRecord = publicEmployeeRecord(employee);
     return {
       ...publicRecord,
+      account: publicEmployeeAccount(
+        accounts?.get(employee.cognitoSubject),
+        employee.email,
+        Boolean(employee.archivedAt),
+        accounts !== null,
+      ),
       completions: employee.completions.map(dateFields),
     };
   });
@@ -232,6 +307,40 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     return reply.status(201).send(publicEmployeeRecord(employee));
   });
+
+  app.post(
+    '/api/v1/admin/employees/:id/resend-invitation',
+    admin,
+    async (request) => {
+      const employee = await (await getPrisma()).employee.findUnique({
+        where: { id: parseId(request) },
+      });
+      ensureFound(employee, 'EMPLOYEE_NOT_FOUND', 'The employee was not found.');
+      if (employee.archivedAt) {
+        throw new AppError(
+          409,
+          'EMPLOYEE_INVITATION_ARCHIVED',
+          'Restore the employee before resending their invitation.',
+        );
+      }
+
+      const account = await resendEmployeeInvitation(
+        employee.cognitoSubject,
+        employee.email,
+      );
+      request.log.info(
+        {
+          employeeId: employee.id,
+          actorSubject: request.auth.subject,
+        },
+        'Employee invitation resend request completed.',
+      );
+      return {
+        ...publicEmployeeRecord(employee),
+        account: publicEmployeeAccount(account, employee.email, false),
+      };
+    },
+  );
 
   app.patch('/api/v1/admin/employees/:id', admin, async (request) => {
     const id = parseId(request);

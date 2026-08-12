@@ -60,9 +60,10 @@ An employee contains only:
 - active or archived state
 - completion history
 
-The list shows name, email, latest completion date, and archive state. Search is
-by name or email. The detail panel supports edit, archive/restore, quick
-completion entry, current training, and full completion history.
+The list shows name, email, latest completion date, Cognito account state, and
+archive state. Search is by name or email. The detail panel supports edit,
+archive/restore, invitation resend when eligible, quick completion entry,
+current training, and full completion history.
 
 Adding an employee requires name and email for administrators and owners. The
 API creates the Cognito user with invitation delivery initially suppressed,
@@ -70,6 +71,26 @@ adds the account only to the `employee` group, stores its immutable `sub`, and
 then sends Cognito's temporary-password invitation. A failure removes both the
 employee row and newly created Cognito user. Email and Cognito subject are
 immutable after creation, and the subject is never returned by the API.
+
+Every employee row is initially created with a provisioned Cognito account;
+account state is not a second account-existence flag. The API loads the current
+members of the Cognito `employee` group and joins them to employee records by
+immutable `sub`. `FORCE_CHANGE_PASSWORD` is displayed as Invitation pending and
+`CONFIRMED` as Account confirmed. Confirmed means that account setup is
+complete, not that the employee has used the application. Disabled, missing,
+email-mismatched, password-reset-required, and unavailable states are shown
+separately. If the Cognito group lookup fails, the employee list and detail
+remain available with Status unavailable instead of failing the
+record-management workflow. Development authentication emulates accounts only
+in memory, so seeded or post-restart employee records show Status unavailable.
+
+Administrators and owners may resend only an active employee's pending
+invitation. Cognito's `RESEND` operation generates a new temporary password,
+restarts its validity period, and supersedes the old temporary password.
+The API coalesces concurrent resend requests and applies a short resend-attempt
+cooldown. Archived employees and disabled, confirmed, missing,
+email-mismatched, or otherwise ineligible accounts cannot be resent. The browser
+never receives a temporary password or Cognito subject.
 
 Employee names are not unique. Archiving removes an employee from Training
 readiness without removing historical completions or deleting the Cognito user.
@@ -191,7 +212,7 @@ There are no optimistic concurrency version fields or edit-conflict flows.
 
 | Entity | Create | Update | Lifecycle action | Delete |
 | --- | --- | --- | --- | --- |
-| Employee | Yes, with Cognito invitation | Name | Archive/restore | No |
+| Employee | Yes, with Cognito invitation | Name | Archive/restore; resend pending invitation | No |
 | Site | Yes | Name/time zone | Archive/restore | No |
 | Course | Yes | Name/validity/sites | Archive/restore | No |
 | Site assignment | Through course | Through course | Preserved on archive | No |
