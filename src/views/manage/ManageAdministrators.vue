@@ -80,7 +80,7 @@ onMounted(loadAdministrators);
     <div class="section-heading">
       <div>
         <h2>Administrators</h2>
-        <p>Invite administrators who can maintain training records.</p>
+        <p>Invite administrators who can maintain compliance records.</p>
       </div>
       <button class="primary-action" type="button" @click="openInvitation">
         Invite administrator

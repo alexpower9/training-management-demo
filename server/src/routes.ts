@@ -11,7 +11,12 @@ import { getPrisma } from './database.js';
 import { formatDateOnly, parseDateOnly, todayInTimeZone } from './dates.js';
 import { publicEmployeeRecord } from './employeeSerialization.js';
 import { AppError } from './errors.js';
-import { getEmployeeReadiness, getSiteReadiness } from './readiness.js';
+import {
+  getEmployeeMedicalReadiness,
+  getEmployeeReadiness,
+  getSiteMedicalReadiness,
+  getSiteReadiness,
+} from './readiness.js';
 import { identifier, parseId } from './routeUtils.js';
 import { registerOwnerRoutes } from './ownerRoutes.js';
 
@@ -65,6 +70,19 @@ export async function registerRoutes(app: FastifyInstance) {
     },
   );
 
+  app.get(
+    '/api/v1/me/medical-readiness',
+    { preHandler: [authenticate, requireEmployeeAccount] },
+    async (request) => {
+      const query = z.object({ asOf: z.string().date().optional() }).parse(request.query);
+      return getEmployeeMedicalReadiness(
+        await getPrisma(),
+        request.auth.employee!.id,
+        query.asOf,
+      );
+    },
+  );
+
   app.get('/api/v1/employees', { preHandler: [authenticate, requireAdmin] }, async () => {
     const employees = await (await getPrisma()).employee.findMany({
       where: { archivedAt: null },
@@ -107,9 +125,55 @@ export async function registerRoutes(app: FastifyInstance) {
     }));
   });
 
+  app.get(
+    '/api/v1/sites/:id/medicals',
+    { preHandler: [authenticate, resolveEmployeeAccount] },
+    async (request) => {
+      const query = z
+        .object({ asOf: z.string().date().optional() })
+        .parse(request.query);
+      const prisma = await getPrisma();
+      const siteId = parseId(request);
+      const site = await prisma.site.findFirst({
+        where: { id: siteId, archivedAt: null },
+      });
+      if (!site) {
+        throw new AppError(
+          404,
+          'SITE_NOT_FOUND',
+          'The requested site was not found.',
+        );
+      }
+      parseDateOnly(query.asOf || todayInTimeZone(site.timeZone));
+      const requirements = await prisma.siteMedicalRequirement.findMany({
+        where: { siteId, medical: { archivedAt: null } },
+        include: { medical: true },
+        orderBy: { medical: { name: 'asc' } },
+      });
+
+      return requirements.map(({ medical }) => ({
+        id: medical.id,
+        siteId,
+        name: medical.name,
+        renewalMonths: medical.validityMonths,
+        validityMonths: medical.validityMonths,
+        active: !medical.archivedAt,
+      }));
+    },
+  );
+
   app.get('/api/v1/sites/:id/readiness', { preHandler: [authenticate, requireAdmin] }, async (request) => {
     const query = z.object({ asOf: z.string().date().optional() }).parse(request.query);
     return getSiteReadiness(await getPrisma(), parseId(request), query.asOf);
+  });
+
+  app.get('/api/v1/sites/:id/medical-readiness', { preHandler: [authenticate, requireAdmin] }, async (request) => {
+    const query = z.object({ asOf: z.string().date().optional() }).parse(request.query);
+    return getSiteMedicalReadiness(
+      await getPrisma(),
+      parseId(request),
+      query.asOf,
+    );
   });
 
   app.get('/api/v1/completions', { preHandler: [authenticate, requireAdmin] }, async (request) => {

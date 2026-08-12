@@ -316,7 +316,7 @@ watch(includeArchived, applySearch);
     <div class="section-heading">
       <div>
         <h2>Employees</h2>
-        <p>Create, maintain, archive, and review employee training records.</p>
+        <p>Create, maintain, archive, and review employee compliance records.</p>
       </div>
       <button class="primary-action" type="button" @click="openCreate">Add employee</button>
     </div>
@@ -339,7 +339,8 @@ watch(includeArchived, applySearch);
               <tr>
                 <th>Employee</th>
                 <th>Email</th>
-                <th>Latest completion</th>
+                <th>Latest training</th>
+                <th>Latest medical</th>
                 <th>Account</th>
                 <th>Record status</th>
               </tr>
@@ -352,12 +353,14 @@ watch(includeArchived, applySearch);
                 tabindex="0"
                 @click="selectEmployee(employee.id)"
                 @keydown.enter="selectEmployee(employee.id)"
+                @keydown.space.prevent="selectEmployee(employee.id)"
               >
                 <td>
                   <strong>{{ employee.displayName }}</strong>
                 </td>
                 <td>{{ employee.email }}</td>
                 <td>{{ employee.latestCompletionOn ? formatDate(employee.latestCompletionOn) : 'None' }}</td>
+                <td>{{ employee.latestMedicalCompletionOn ? formatDate(employee.latestMedicalCompletionOn) : 'None' }}</td>
                 <td>
                   <span :class="accountStatusClass(employee)">
                     {{ accountStatus(employee).label }}
@@ -378,7 +381,7 @@ watch(includeArchived, applySearch);
 
       <DetailPanel
         :title="selected?.displayName || 'Employee detail'"
-        :subtitle="selected ? 'Training record' : 'Select an employee to inspect their record.'"
+        :subtitle="selected ? 'Compliance record' : 'Select an employee to inspect their record.'"
       >
         <template v-if="selected" #actions>
           <div class="inline-actions">
@@ -412,14 +415,22 @@ watch(includeArchived, applySearch);
               {{ invitationBusy ? 'Resending...' : 'Resend invitation' }}
             </button>
           </section>
-          <RouterLink
-            :to="{ name: 'manage-completions', query: { action: 'create', employeeId: selected.id } }"
-            class="primary-action"
-          >
-            Record completion
-          </RouterLink>
+          <div class="inline-actions">
+            <RouterLink
+              :to="{ name: 'manage-completions', query: { type: 'training', action: 'create', employeeId: selected.id } }"
+              class="primary-action"
+            >
+              Record training
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'manage-completions', query: { type: 'medical', action: 'create', employeeId: selected.id } }"
+              class="primary-action"
+            >
+              Record medical
+            </RouterLink>
+          </div>
           <div>
-            <h3 class="detail-heading">Completion history</h3>
+            <h3 class="detail-heading">Training completion history</h3>
             <div v-if="selected.completions.length" class="stack-list">
               <article
                 v-for="completion in selected.completions"
@@ -446,6 +457,36 @@ watch(includeArchived, applySearch);
             <div v-else class="empty-state">
               <strong>No completion history</strong>
               <p>Record the employee's first course completion.</p>
+            </div>
+          </div>
+          <div>
+            <h3 class="detail-heading">Medical completion history</h3>
+            <div v-if="selected.medicalCompletions?.length" class="stack-list">
+              <article
+                v-for="completion in selected.medicalCompletions"
+                :key="completion.id"
+                class="requirement-row"
+              >
+                <div>
+                  <strong>{{ completion.medical.name }}</strong>
+                  <span>Completed {{ formatDate(completion.completedOn) }}</span>
+                </div>
+                <div class="requirement-status">
+                  <ArchiveBadge v-if="completion.voidedAt" archived />
+                  <StatusBadge v-else :status="completionStatus(completion)" />
+                  <div class="completion-meta-actions">
+                    <span>{{ completionExpiryText(completion) }}</span>
+                    <CompletionCommentButton
+                      :comment="completion.comment"
+                      :label="`View medical completion comment for ${completion.medical.name}`"
+                    />
+                  </div>
+                </div>
+              </article>
+            </div>
+            <div v-else class="empty-state">
+              <strong>No medical completion history</strong>
+              <p>Record the employee's first medical completion.</p>
             </div>
           </div>
         </div>
@@ -490,8 +531,8 @@ watch(includeArchived, applySearch);
     :title="selected?.archivedAt ? 'Restore employee?' : 'Archive employee?'"
     :message="
       selected?.archivedAt
-        ? 'The employee will return to current readiness views.'
-        : 'The employee will be removed from current readiness views. Completion history is preserved.'
+        ? 'The employee will return to Training and Medical readiness views.'
+        : 'The employee will be removed from Training and Medical readiness views. Completion history is preserved.'
     "
     :confirm-label="selected?.archivedAt ? 'Restore' : 'Archive'"
     :danger="!selected?.archivedAt"

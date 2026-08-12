@@ -76,9 +76,11 @@ test.describe.serial('training management smoke tests', () => {
     await page.getByRole('button', { name: 'Archive' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Archive' }).click();
     await expect(page.getByText('Course archived.')).toBeVisible();
+    await expect(page.getByText(site.name, { exact: true })).toBeVisible();
 
     await page.goto(`/manage/sites/${site.id}`);
-    await expect(page.getByText(courseName)).toBeVisible();
+    await expect(page.getByText('No required courses', { exact: true })).toBeVisible();
+    await expect(page.getByText(courseName, { exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Assign course' })).toHaveCount(0);
   });
 
@@ -147,9 +149,14 @@ test.describe.serial('training management smoke tests', () => {
     });
 
     await page.goto(`/manage/completions?action=create&employeeId=${employee.id}`);
-    await page.getByLabel('Course').selectOption(course.id);
-    await page.getByLabel('Completed on').fill('2026-01-31');
-    await page.getByLabel('Comment').fill('Certificate verified during smoke test');
+    const courseDrawer = page.getByRole('dialog', {
+      name: 'Record course completion',
+    });
+    await courseDrawer.locator('select').nth(1).selectOption(course.id);
+    await courseDrawer.getByLabel('Completed on').fill('2026-01-31');
+    await courseDrawer
+      .getByLabel('Comment')
+      .fill('Certificate verified during smoke test');
     await expect(page.getByText('Expires Feb 28, 2026')).toBeVisible();
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByText('Completion recorded.')).toBeVisible();
@@ -164,6 +171,113 @@ test.describe.serial('training management smoke tests', () => {
     await page.getByLabel('Reason').fill('Incorrect date entered during smoke test');
     await page.getByRole('button', { name: 'Void completion' }).click();
     await expect(page.getByText('Completion voided.')).toBeVisible();
+  });
+
+  test('medical requirement controls combined site access and supports completion voiding', async ({
+    page,
+    request,
+  }) => {
+    const employee = await create(request, '/employees', {
+      displayName: unique('Medical Employee'),
+      email: `${unique('medical-employee')}@example.com`,
+    });
+    const site = await create(request, '/sites', {
+      name: unique('Medical Site'),
+      timeZone: 'America/St_Johns',
+    });
+    const course = await create(request, '/courses', {
+      name: unique('Medical Access Course'),
+      validityMonths: 12,
+      siteIds: [site.id],
+    });
+    await create(request, '/completions', {
+      employeeId: employee.id,
+      courseId: course.id,
+      completedOn: '2026-06-01',
+    });
+
+    const medicalName = unique('Fitness to Work');
+    await page.goto('/manage/medicals');
+    await page.getByRole('button', { name: 'Add medical' }).click();
+    await page.getByLabel('Medical name').fill(medicalName);
+    await page.getByLabel(site.name).check();
+    await page.getByLabel('Validity in months').fill('12');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Medical added.')).toBeVisible();
+
+    const medicalResponse = await request.get('/api/v1/admin/medicals', {
+      headers: adminHeaders,
+      params: { search: medicalName },
+    });
+    const medical = (await medicalResponse.json()).items[0];
+    let readinessResponse = await request.get(
+      `/api/v1/sites/${site.id}/readiness?asOf=2026-06-05`,
+      { headers: adminHeaders },
+    );
+    let summary = (await readinessResponse.json()).find(
+      (row) => row.employee.id === employee.id,
+    );
+    expect(summary.status).toBe('compliant');
+    expect(summary.domainEligible).toBe(true);
+    expect(summary.eligible).toBe(false);
+    expect(summary.combinedAccess.eligible).toBe(false);
+    expect(summary.combinedAccess.blockingDomains).toEqual(['medical']);
+
+    const missingMedicalReadinessResponse = await request.get(
+      `/api/v1/sites/${site.id}/medical-readiness?asOf=2026-06-05`,
+      { headers: adminHeaders },
+    );
+    const missingMedicalSummary = (await missingMedicalReadinessResponse.json()).find(
+      (row) => row.employee.id === employee.id,
+    );
+    expect(missingMedicalSummary.status).toBe('incomplete');
+    expect(missingMedicalSummary.domainEligible).toBe(false);
+    expect(missingMedicalSummary.eligible).toBe(false);
+
+    await page.goto(`/manage/completions?type=medical&action=create&employeeId=${employee.id}`);
+    const medicalDrawer = page.getByRole('dialog', {
+      name: 'Record medical completion',
+    });
+    await medicalDrawer.locator('select').nth(1).selectOption(medical.id);
+    await medicalDrawer.getByLabel('Completed on').fill('2026-06-01');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Completion recorded.')).toBeVisible();
+
+    readinessResponse = await request.get(
+      `/api/v1/sites/${site.id}/readiness?asOf=2026-06-05`,
+      { headers: adminHeaders },
+    );
+    summary = (await readinessResponse.json()).find(
+      (row) => row.employee.id === employee.id,
+    );
+    expect(summary.status).toBe('compliant');
+    expect(summary.domainEligible).toBe(true);
+    expect(summary.eligible).toBe(true);
+    expect(summary.combinedAccess.eligible).toBe(true);
+
+    await page.locator('tbody').getByText(employee.displayName, { exact: true }).click();
+    await page.getByRole('button', { name: 'Renew' }).click();
+    await expect(page.locator('.form-drawer select').first()).toHaveValue(employee.id);
+    await expect(page.locator('.form-drawer select').nth(1)).toHaveValue(medical.id);
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
+    await page.locator('tbody').getByText(employee.displayName, { exact: true }).click();
+    await page.getByRole('button', { name: 'Void' }).click();
+    await page.getByLabel('Reason').fill('Incorrect medical completion');
+    await page.getByRole('button', { name: 'Void completion' }).click();
+    await expect(page.getByText('Completion voided.')).toBeVisible();
+
+    readinessResponse = await request.get(
+      `/api/v1/sites/${site.id}/readiness?asOf=2026-06-05`,
+      { headers: adminHeaders },
+    );
+    summary = (await readinessResponse.json()).find(
+      (row) => row.employee.id === employee.id,
+    );
+    expect(summary.status).toBe('compliant');
+    expect(summary.domainEligible).toBe(true);
+    expect(summary.eligible).toBe(false);
+    expect(summary.combinedAccess.eligible).toBe(false);
   });
 
   test('employee access is rejected for admin mutations', async ({ request }) => {

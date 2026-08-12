@@ -160,27 +160,105 @@ Create an Amazon RDS for PostgreSQL instance with:
   instance class; and
 - Multi-AZ if the business requires availability beyond a single-AZ v1.
 
+The migration and privilege automation assumes that `nme_training` is a
+dedicated database and that its `public` schema is reserved for this
+application. All Prisma migrations, `_prisma_migrations`, and the eight
+business tables must be in that schema. Do not point the automation at a
+database whose `public` schema contains another application's objects. The
+migration step revokes public schema creation, resets the runtime role's table
+privileges, and rejects runtime access to tables outside its explicit
+allowlist.
+
 Use separate credentials:
 
-- a migration owner that can create extensions, tables, indexes, and
-  constraints; and
+- a migration owner that owns the `public` schema and all application tables,
+  and can create extensions, tables, indexes, and constraints; and
 - an application user used by Fastify at runtime.
 
 The application user should have:
 
 - `CONNECT` on the database;
+- no database `CREATE` or `TEMP` privilege;
 - `USAGE` on the application schema;
-- `SELECT`, `INSERT`, and `UPDATE` on the five business tables; and
-- `DELETE` on `site_course_requirement` so course edits can replace assignments;
-- no `DELETE` permission on the other business tables; and
+- `SELECT`, `INSERT`, and `UPDATE` on `employee`, `site`, `course`, and
+  `medical`;
+- `SELECT`, `INSERT`, and `DELETE` on `site_course_requirement` and
+  `site_medical_requirement`, with no `UPDATE`;
+- `SELECT` and `INSERT` on `course_completion` and `medical_completion`, plus
+  column-level `UPDATE` only on `voided_at`, `voided_by_subject`, and
+  `void_reason`;
+- no sequence privileges (the current schema uses UUID defaults);
+- no table-level completion `UPDATE`, no completion `DELETE`, and no assignment
+  `UPDATE`; and
 - no schema-change permission.
 
-Database migrations must run as the migration owner, not as the application
-user.
+Configure the runtime role as `LOGIN NOINHERIT`: no role memberships and no
+`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, or bypass-RLS option. It
+must not inherit privileges from the migration role or an RDS administrative
+role.
+
+Database migrations and grants must run as the migration owner, never as the
+application user. The automated migration step removes existing runtime table
+privileges before applying this allowlist, so an older over-privileged runtime
+role does not remain over-privileged after deployment.
+
+### First-deployment role bootstrap
+
+Prisma and `npm run migrate:production` do not create the database or database
+roles. Before the first deployment, a privileged RDS bootstrap identity must:
+
+1. create the dedicated `nme_training` database;
+2. create distinct login roles for migration and runtime use, with separately
+   generated passwords;
+3. make the migration role the database owner and owner of the `public`
+   schema;
+4. revoke `CONNECT`, `CREATE`, and `TEMP` on this dedicated database from
+   `PUBLIC`, explicitly grant `CONNECT` to the migration and runtime roles,
+   revoke runtime `CREATE` and `TEMP`, and remove any privileged runtime
+   memberships; and
+5. store each role's credentials in its own Secrets Manager secret.
+
+Use an approved infrastructure-as-code or privileged database-administration
+workflow so generated passwords do not enter shell history. Do not grant the
+runtime role membership in the migration role. The first migration run creates
+`_prisma_migrations` and the application tables as the migration owner, then
+applies and verifies the runtime allowlist. The bootstrap identity does not
+need to remain available to either application service afterward.
+
+### One-time cutover for an existing installation
+
+An installation that previously used one direct database login must transfer
+object ownership before enabling the split-role deployment. Schedule a
+maintenance window and take an RDS snapshot, then:
+
+1. stop application writes and record the current database, schema, table,
+   sequence, function, extension, and `_prisma_migrations` owners, plus any
+   role or parameter grants held by the legacy login;
+2. create the new migration role and a distinct runtime role (or retain the
+   old application role only as the restricted runtime role);
+3. using the current owner or RDS administrative identity, transfer the
+   dedicated database, `public` schema, `_prisma_migrations`, and every
+   application table, sequence, function, and remaining extension to the
+   migration role; revoke any privileged parameter grants such as permission
+   to set `session_replication_role`;
+4. verify that no application object remains owned by the runtime role, that
+   it has no role membership or privileged parameter grant, and that the
+   migration role can alter the schema and migration history;
+5. create the two Secrets Manager secrets, update the service environment as
+   described below, and remove any persistent direct `DATABASE_URL`; and
+6. run `nme-migrate.service` once before restarting the API. It applies pending
+   migrations, replaces legacy grants with the allowlist, and reconnects as the
+   runtime role to verify the result.
+
+`REASSIGN OWNED` may be appropriate when the legacy role owns only objects in
+this dedicated database, but review its complete target set first. Do not use
+`DROP OWNED`, and do not perform an ownership transfer in a shared database.
+Resume writes only after migration, runtime privilege verification, API
+health, and core Training and Medical checks succeed.
 
 ## 7. Store Database Credentials
 
-Create Secrets Manager secrets containing JSON with:
+Create a runtime Secrets Manager secret containing JSON with:
 
 ```json
 {
@@ -192,12 +270,25 @@ Create Secrets Manager secrets containing JSON with:
 }
 ```
 
-Create a separate migration secret for the migration owner.
+Create a separate migration secret with the same shape and the migration-owner
+username and password. The two secret ARNs and database usernames must differ;
+the migration command rejects a shared secret or role.
 
-Attach an IAM role to EC2 through an instance profile. Grant only:
+The recommended production credential boundary is a protected CI or CodeBuild
+release job with its own IAM role. Give that job access to the migration
+secret and the runtime secret (the latter is needed only for post-grant
+verification), and give the EC2 instance role access only to the runtime
+secret. The release job applies the migration and validates privileges before
+the application deployment runs with `NME_DEPLOY_SKIP_MIGRATIONS=1`. Protect
+the job with approvals, restricted logs and artifacts, and no untrusted pull
+request execution.
 
-- `secretsmanager:GetSecretValue` for the application secret;
-- `kms:Decrypt` if the secret uses a customer-managed KMS key;
+Attach an IAM role to EC2 through an instance profile. In the recommended
+split workflow, grant only:
+
+- `secretsmanager:GetSecretValue` for the runtime secret;
+- `kms:Decrypt` for the runtime secret's key if it uses a customer-managed KMS
+  key;
 - `cognito-idp:ListUsersInGroup`, `cognito-idp:AdminCreateUser`,
   `cognito-idp:AdminAddUserToGroup`, and `cognito-idp:AdminDeleteUser` for this
   application's user-pool ARN;
@@ -207,6 +298,12 @@ Attach an IAM role to EC2 through an instance profile. Grant only:
 Do not store AWS access keys on EC2. The AWS SDK automatically uses the
 instance-role credentials.
 
+For a small initial deployment, the repository also supports running the
+one-shot migration service on EC2. That transitional workflow additionally
+requires the instance role to read the migration secret and decrypt its KMS
+key. It is operational separation between systemd services, not a strong
+credential boundary.
+
 Employee account-state lookup and invitation resend use the existing
 `ListUsersInGroup` and `AdminCreateUser` permissions. They require no additional
 IAM actions or direct Amazon SES permission.
@@ -214,6 +311,15 @@ IAM actions or direct Amazon SES permission.
 The API reads `DATABASE_SECRET_ARN` at startup. After a database-secret
 rotation, restart the API service so it creates a new pool with the current
 credentials.
+
+When the same-host fallback is used, the migration unit reads
+`MIGRATION_DATABASE_SECRET_ARN` from an environment file readable only by root
+and the dedicated migration service identity; the API unit does not receive
+that variable. A compromised host or process able to use the instance-role
+credentials could nevertheless retrieve the migration secret. Move migration
+execution to the recommended protected release job before the threat model
+requires a strong boundary; then remove the migration environment file and all
+migration-secret/KMS access from the EC2 role.
 
 ## 8. Require And Validate Database TLS
 
@@ -378,7 +484,11 @@ npm --version
 Create the service account and directories:
 
 ```sh
-sudo useradd --system --home-dir /opt/nme-training --shell /sbin/nologin nme-training
+id nme-training >/dev/null 2>&1 || \
+  sudo useradd --system --home-dir /opt/nme-training --shell /sbin/nologin nme-training
+id nme-migration >/dev/null 2>&1 || \
+  sudo useradd --system --home-dir /nonexistent --shell /sbin/nologin nme-migration
+sudo usermod --append --groups nme-training nme-migration
 sudo mkdir -p /opt/nme-training /var/www/nme-training /var/www/certbot /etc/nme-training
 sudo chown -R "$USER":nme-training /opt/nme-training
 sudo chmod 0750 /opt/nme-training
@@ -386,7 +496,17 @@ sudo chmod 0750 /opt/nme-training
 
 Deploy source or a CI-built artifact to `/opt/nme-training`. Production should
 use `npm ci`, never an unpinned `npm install`. The regular EC2 deployment user
-owns the checkout; the `nme-training` service group has read access.
+owns the checkout; the `nme-training` service group gives both service
+identities read-only traversal of it. Create `nme-migration` before installing
+or starting `nme-migrate.service`. It has no login shell and must never run the
+long-lived API.
+
+The supplementary group is a compatibility measure for the same-host
+checkout, not an ideal release boundary. Verify that the group has no write
+permission on the repository, migration files, built server, or dependencies.
+Prefer a CI-built, checksummed immutable release artifact installed root-owned
+and readable by the service identities; run the protected migration from that
+exact artifact rather than from a mutable checkout.
 
 ## 11. Production Environment Values
 
@@ -425,6 +545,55 @@ sudo chown root:nme-training /etc/nme-training/api.env
 sudo chmod 640 /etc/nme-training/api.env
 ```
 
+`DATABASE_SECRET_ARN` must contain the runtime application credentials. A
+production API must not receive a persistent `DATABASE_URL`: remove that
+variable from `/etc/nme-training/api.env`, systemd overrides, shell profiles,
+and deployment configuration during an existing-install cutover. Use
+`DATABASE_URL` only for local development and for the short-lived Prisma child
+process constructed by the protected migration command. Never paste a
+production URL into a command line, tracked file, or service environment. API
+startup rejects an ambiguous production configuration that supplies both
+`DATABASE_URL` and `DATABASE_SECRET_ARN`.
+
+When the same-EC2 migration fallback is used, create a self-contained migration
+environment. The migration unit deliberately does not read `api.env`:
+
+```sh
+if ! sudo test -e /etc/nme-training/migration.env; then
+  sudo install -o root -g nme-migration -m 0640 /dev/null /etc/nme-training/migration.env
+fi
+sudo chown root:nme-migration /etc/nme-training/migration.env
+sudo chmod 640 /etc/nme-training/migration.env
+sudoedit /etc/nme-training/migration.env
+```
+
+```dotenv
+MIGRATION_DATABASE_SECRET_ARN=arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:MIGRATION_SECRET_NAME
+DATABASE_SECRET_ARN=arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:RUNTIME_SECRET_NAME
+DATABASE_HOST=database.example.us-east-1.rds.amazonaws.com
+DATABASE_PORT=5432
+DATABASE_NAME=nme_training
+RDS_CA_CERT_PATH=/etc/pki/rds/rds-ca-rsa2048-g1.pem
+AWS_REGION=us-east-1
+```
+
+Confirm its protection after editing:
+
+```sh
+sudo chown root:nme-migration /etc/nme-training/migration.env
+sudo chmod 640 /etc/nme-training/migration.env
+```
+
+Only root and the dedicated unprivileged `nme-migration` identity can read this
+file; the long-lived `nme-training` API identity cannot. The migration service
+receives only this environment file; do not copy API authentication settings
+into it, and do not add `MIGRATION_DATABASE_SECRET_ARN` to `api.env`.
+
+In the recommended CI/CodeBuild workflow, do not create `migration.env` on
+EC2. Configure the two secret ARNs only in the protected release job, remove
+the EC2 instance role's migration-secret access, and deploy application code
+with the migration-skip guard described below after the job succeeds.
+
 ## 12. Build And Apply Migrations
 
 Run the verification suite before every production deployment:
@@ -443,21 +612,72 @@ values, non-HTTPS redirect URLs, and mismatched callback hosts.
 Use `prisma migrate deploy` for production. Never run `migrate dev`,
 `migrate reset`, or the test database scripts against production.
 
-The Prisma CLI requires `DATABASE_URL`; it cannot use
-`DATABASE_SECRET_ARN` through the API startup helper. The deployment process
-must retrieve the migration secret into the deployment process, construct the
-TLS-validated migration URL in memory with `sslmode=require`,
-`sslaccept=strict`, and `sslcert=/etc/pki/rds/rds-ca-rsa2048-g1.pem`, run:
+The Prisma CLI requires `DATABASE_URL`; it cannot use a Secrets Manager ARN
+directly. The protected migration command runs `npm run migrate:production`,
+which retrieves `MIGRATION_DATABASE_SECRET_ARN` and `DATABASE_SECRET_ARN`
+separately, constructs TLS-validated URLs in memory with `sslmode=require`,
+`sslaccept=strict`, and the configured CA certificate, and runs:
 
 ```sh
 npm run prisma:migrate
 ```
 
-and then discard the environment value. Do not print the URL or write it to the
-repository.
+with only the migration-owner URL in that child process. It never prints either
+URL or writes one to disk; this ephemeral implementation detail is not
+authorization to configure `DATABASE_URL` on the production host.
 
-For future releases, make `prisma migrate deploy` a protected CI/CD release
-step. Apply backward-compatible migrations before switching application code.
+For a first manual deployment using the same-EC2 fallback, install and run the
+protected one-shot unit after completing the role bootstrap and production
+build:
+
+```sh
+sudo install -o root -g root -m 0644 \
+  deploy/nme-migrate.service /etc/systemd/system/nme-migrate.service
+sudo systemctl daemon-reload
+sudo systemctl start nme-migrate.service
+sudo systemctl --no-pager --full status nme-migrate.service
+```
+
+`npm run deploy:ec2:setup` installs this unit for the automated same-host
+deployment path. The external-migration setup mode intentionally omits it and
+does not grant the deployment user permission to start it. Do not invoke the Prisma CLI directly with runtime
+credentials.
+
+After Prisma succeeds, the same command transactionally resets the runtime
+role's privileges and grants:
+
+- `CONNECT` (but not `CREATE` or `TEMP`) on the dedicated database;
+- `USAGE` (but not `CREATE`) on `public`;
+- `SELECT`, `INSERT`, and `UPDATE` on the four catalogue/shared tables:
+  `employee`, `site`, `course`, and `medical`;
+- `SELECT`, `INSERT`, and `DELETE` on the two assignment tables:
+  `site_course_requirement` and `site_medical_requirement`; and
+- `SELECT` and `INSERT` on the two completion tables, with `UPDATE` limited to
+  their `voided_at`, `voided_by_subject`, and `void_reason` columns.
+
+It grants no sequence privileges; current primary keys use UUID defaults. The
+migration owner explicitly gives the runtime role no automatic default table
+or sequence privileges. This is intentional: a later migration that adds a
+business table must update the migration script's allowlist, rather than
+silently exposing that table. Finally, the command opens a new TLS connection
+with the runtime secret and verifies the database, role, schema, table, column,
+sequence, and migration-history boundaries. Any migration, grant, connection,
+or privilege check failure stops deployment before `nme-api` is restarted.
+
+For the recommended protected release workflow, build and test the exact
+release commit in CI/CodeBuild, run `npm run migrate:production` there, and
+require its migration and runtime-privilege verification to succeed. Only then
+deploy the same commit to EC2 with:
+
+```sh
+NME_DEPLOY_SKIP_MIGRATIONS=1 NME_SCHEMA_COMPATIBILITY_CONFIRMED=1 \
+  NME_EXTERNAL_MIGRATION_COMMIT="$(git rev-parse HEAD)" npm run deploy:ec2
+```
+
+The skip flag is a guard for a migration already applied by the protected job;
+it is not a way to ignore a pending or failed migration. Record the release
+commit and migration-job result together. Apply backward-compatible migrations
+before switching application code.
 
 Do not run `npm run prisma:seed` in production unless the decision to load demo
 data is deliberate and approved.
@@ -478,7 +698,7 @@ sudo cp deploy/nme-api.service /etc/systemd/system/nme-api.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now nme-api
 sudo systemctl status nme-api
-curl http://127.0.0.1:3000/health
+curl http://127.0.0.1:3000/ready
 ```
 
 ### Automated redeployment
@@ -493,14 +713,30 @@ npm run deploy:ec2:setup
 npm run deploy:ec2
 ```
 
-The setup command installs three fixed-purpose systemd units, grants the
-deployment user passwordless access only to start or restart those units, and
+For the recommended protected CI/CodeBuild migration path, omit the EC2
+migration unit and credential entirely:
+
+```sh
+NME_EC2_EXTERNAL_MIGRATIONS=1 npm run deploy:ec2:setup
+NME_DEPLOY_SKIP_MIGRATIONS=1 NME_SCHEMA_COMPATIBILITY_CONFIRMED=1 \
+  NME_EXTERNAL_MIGRATION_COMMIT="$(git rev-parse HEAD)" npm run deploy:ec2
+```
+
+The external migration job must have succeeded for this exact commit before
+the second command runs. External mode persists in local Git configuration and
+disables post-merge/post-checkout auto-deployment; every application deploy
+must carry its approved exact-commit migration receipt.
+
+The setup command installs the API and frontend units plus, in same-host mode,
+the migration unit. It grants the deployment user passwordless access only to
+start or restart the installed units, and
 sets this checkout's `core.hooksPath` to `.githooks`. The branch checked out
 during setup is stored as the only automatic deployment branch. Setup also
 normalizes ownership of existing frontend assets so the publisher can replace
 files left by an earlier root-owned deployment.
 
-After setup, either pull normally and let the `post-merge` hook deploy:
+In same-host migration mode, either pull normally and let the `post-merge`
+hook deploy:
 
 ```sh
 git pull --ff-only
@@ -512,30 +748,66 @@ or use the explicit update command:
 npm run deploy:ec2:update
 ```
 
+In external-migration mode, those hooks intentionally do not deploy and the
+generic update command is not sufficient. Pull without auto-deploy, wait for
+the protected migration receipt for the resulting commit, and run:
+
+```sh
+NME_SKIP_AUTO_DEPLOY=1 git pull --ff-only
+NME_DEPLOY_SKIP_MIGRATIONS=1 NME_SCHEMA_COMPATIBILITY_CONFIRMED=1 \
+  NME_EXTERNAL_MIGRATION_COMMIT="$(git rev-parse HEAD)" npm run deploy:ec2
+```
+
 The deployment refuses a dirty worktree, prevents concurrent runs, installs
 from `package-lock.json`, runs tests, builds both applications, applies
-production migrations, restarts and health-checks the API, and only then
-publishes the frontend. Successful commit IDs are stored in the ignored
-`.deployment/deployments.log`.
+production migrations (unless the protected-job guard is explicitly set),
+restarts and health-checks the API, and only then publishes the frontend.
+Successful commit IDs are stored in the ignored
+`.deployment/deployments.log`. Set `NME_DEPLOY_SKIP_MIGRATIONS=1` only when the
+protected migration job has already succeeded for this exact release commit.
 
 If a release changes a file under `deploy/*.service`, rerun
 `npm run deploy:ec2:setup` once so the root-owned systemd copy is refreshed.
+Use `NME_EC2_EXTERNAL_MIGRATIONS=1` again when that is the selected deployment
+architecture.
 
 Use annotated Git tags for releases. To redeploy an earlier application
 version, first verify that its code remains compatible with all migrations
-already applied to production, then run:
+already applied to production. In particular, confirm that no applied migration
+removed or changed a table, column, constraint, or payload the older API
+requires, and exercise the rollback artifact against a current-schema staging
+copy. The Medical migration is additive, so a preceding application release
+that ignores the new tables is schema-compatible once this check passes.
+
+Do not rerun migrations during an application-only rollback. From a rollback
+target whose deployment driver supports the guard, run:
 
 ```sh
 NME_SKIP_AUTO_DEPLOY=1 git switch --detach RELEASE_TAG_OR_COMMIT
-NME_DEPLOY_ALLOW_REF=1 npm run deploy:ec2
+NME_DEPLOY_ALLOW_REF=1 NME_DEPLOY_SKIP_MIGRATIONS=1 \
+  NME_SCHEMA_COMPATIBILITY_CONFIRMED=1 \
+  NME_EXTERNAL_MIGRATION_COMMIT="$(git rev-parse HEAD)" npm run deploy:ec2
 ```
+
+An older tag may predate `NME_DEPLOY_SKIP_MIGRATIONS`. In that case, use the
+retained rollback-aware deployment driver from this release or deploy the
+previous immutable frontend/API artifact manually; do not run the legacy
+deployment command and assume it honors an unknown environment variable. Keep
+deployment tooling outside versioned application artifacts in a mature release
+pipeline.
 
 Return to the production branch with the same guard, then deploy it:
 
 ```sh
 NME_SKIP_AUTO_DEPLOY=1 git switch main
-npm run deploy:ec2
+NME_DEPLOY_SKIP_MIGRATIONS=1 NME_SCHEMA_COMPATIBILITY_CONFIRMED=1 \
+  NME_EXTERNAL_MIGRATION_COMMIT="$(git rev-parse HEAD)" npm run deploy:ec2
 ```
+
+The final skip above is valid only while the production branch identifies the
+same already-applied schema release. If it contains a newer pending migration,
+run the protected migration job first or omit the flag in the same-host
+workflow.
 
 Set `NME_DEPLOY_FORCE=1` only when the same commit must be rebuilt, such as
 after correcting the ignored `.env.production` file. The API deployment is
@@ -589,7 +861,7 @@ Use a staging environment first. It should have a different:
 - hostname;
 - Cognito user pool or app client;
 - RDS database;
-- Secrets Manager secret; and
+- Secrets Manager runtime and migration secrets; and
 - environment configuration.
 
 Validate:
@@ -600,19 +872,36 @@ Validate:
 4. Pending active employees show Invitation pending and can receive a replacement invitation.
 5. Confirmed, disabled, missing, mismatched, and archived employee accounts cannot resend invitations.
 6. A Cognito lookup failure shows account status as unavailable without hiding employee records.
-7. Site archive and restore preserve course assignments.
-8. Course create and edit atomically replace site assignments.
-9. Completion expiry is calculated from course validity.
+7. Site archive and restore preserve course and medical assignments.
+8. Course and Medical create/edit atomically replace site assignments.
+9. Completion expiry is calculated from Course or Medical validity.
 10. January 31 expiry clamps correctly in February.
 11. Renewal and void workflows work.
-12. Course archive and restore preserve and suspend site assignments.
+12. Course and Medical archive/restore preserve and suspend site assignments.
 13. Expired access tokens return `401`.
 14. Employee broad-read and mutation requests return `403`.
 15. The browser never receives database credentials or temporary passwords.
 16. RDS is not publicly reachable.
 17. The API is not reachable directly on port 3000.
 18. A backup can be restored into a separate RDS instance.
-19. A previous application release can be redeployed.
+19. A previous application release passes current-schema compatibility checks
+    and can be redeployed without starting the migration service.
+20. The migration creates empty Medical tables without changing Course counts
+    or Training readiness.
+21. The runtime role can manage Medical catalogue records and assignments and
+    can insert/void Medical completions, but cannot change immutable completion
+    facts or delete completion history; the migration service uses
+    migration-owner credentials.
+22. The migration unit refuses shared migration/runtime roles, verifies the
+    eight-table runtime allowlist, and completes before the API is restarted.
+23. The database is dedicated to this application, all Prisma objects are in
+    `public`, and the migration role owns the database, schema, history, tables,
+    and sequences.
+24. The API service has no direct `DATABASE_URL` and cannot read
+    `migration.env`; the dedicated migration identity is not used by the API.
+25. When CI/CodeBuild runs migrations, the EC2 role cannot retrieve the
+    migration secret and the exact application commit deploys with the
+    migration-skip guard only after the protected job succeeds.
 
 ## 15. Monitoring And Alerts
 
@@ -654,9 +943,18 @@ Use:
 Application rollback:
 
 1. Stop traffic-changing work.
-2. Redeploy the previous frontend and API artifact.
-3. Restart `nme-api`.
-4. Verify health and core workflows.
+2. Compare the target artifact with every migration already recorded in
+   `_prisma_migrations`, and verify it against a current-schema staging copy.
+3. Redeploy the previous frontend and API artifact with
+   `NME_DEPLOY_SKIP_MIGRATIONS=1`; do not attempt to reverse or reapply the
+   schema as part of an application rollback.
+4. Restart `nme-api`.
+5. Verify health plus employee, Training, Medical, and management workflows.
+
+Use the migration-skip guard only after the compatibility check. If the target
+deployment driver predates that flag, use the retained current driver or a
+manual immutable-artifact procedure that does not start
+`nme-migrate.service`.
 
 Database rollback is not normally `migrate reset` or an edited migration.
 Prefer forward-fix migrations. For destructive failure, restore RDS to a new
@@ -674,20 +972,28 @@ Use this order:
 5. Run integration and Playwright tests against staging.
 6. Add CloudWatch, alarms, backups, and restore testing.
 7. Install the RDS root CA selected by the database.
-8. Create production RDS, secrets, Cognito, EC2, DNS, and TLS.
-9. Apply the production migration.
-10. Create the sole owner manually, then invite the first administrator.
-11. Run the pre-launch checklist.
-12. Import or enter real data.
-13. Open access to the intended users.
-14. Monitor closely and keep the previous release artifact available.
+8. Create the dedicated production database and bootstrap its distinct
+   migration/runtime roles and ownership.
+9. Create production secrets, Cognito, EC2, DNS, and TLS; do not configure a
+   direct production `DATABASE_URL`.
+10. Apply the production migration in the protected release job (recommended)
+    or the dedicated same-EC2 migration unit.
+11. Deploy the exact application commit, using the migration-skip guard only
+    after the protected job succeeds.
+12. Create the sole owner manually, then invite the first administrator.
+13. Run the pre-launch checklist.
+14. Import or enter real data.
+15. Open access to the intended users.
+16. Monitor closely and keep the previous release artifact and rollback-aware
+    deployment driver available.
 
 ## 18. Items Still Needed Before Production
 
 The application feature implementation is substantially ready, but the
 production platform is not yet complete. Before launch, complete:
 
-- a protected migration-secret workflow;
+- a protected CI/CodeBuild migration job with its own IAM role (recommended),
+  or a documented risk acceptance for the weaker same-EC2 fallback;
 - real Cognito and domain values;
 - staging;
 - CloudWatch logs and alarms;

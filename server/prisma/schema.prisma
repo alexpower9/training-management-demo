@@ -8,27 +8,29 @@ datasource db {
 }
 
 model Employee {
-  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  displayName    String             @map("display_name") @db.VarChar(160)
-  email          String             @db.VarChar(254)
-  cognitoSubject String             @unique @map("cognito_subject") @db.VarChar(255)
-  archivedAt     DateTime?          @map("archived_at") @db.Timestamptz(3)
-  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
-  completions    CourseCompletion[]
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayName        String              @map("display_name") @db.VarChar(160)
+  email              String              @db.VarChar(254)
+  cognitoSubject     String              @unique @map("cognito_subject") @db.VarChar(255)
+  archivedAt         DateTime?           @map("archived_at") @db.Timestamptz(3)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  completions        CourseCompletion[]
+  medicalCompletions MedicalCompletion[]
 
   @@index([archivedAt, displayName])
   @@map("employee")
 }
 
 model Site {
-  id           String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name         String                  @db.VarChar(160)
-  timeZone     String                  @default("America/St_Johns") @map("time_zone") @db.VarChar(80)
-  archivedAt   DateTime?               @map("archived_at") @db.Timestamptz(3)
-  createdAt    DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt    DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
-  requirements SiteCourseRequirement[]
+  id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String                   @db.VarChar(160)
+  timeZone            String                   @default("America/St_Johns") @map("time_zone") @db.VarChar(80)
+  archivedAt          DateTime?                @map("archived_at") @db.Timestamptz(3)
+  createdAt           DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  requirements        SiteCourseRequirement[]
+  medicalRequirements SiteMedicalRequirement[]
 
   @@index([archivedAt, name])
   @@map("site")
@@ -59,6 +61,31 @@ model SiteCourseRequirement {
   @@map("site_course_requirement")
 }
 
+model Medical {
+  id             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String                   @db.VarChar(180)
+  validityMonths Int                      @map("validity_months") @db.SmallInt
+  archivedAt     DateTime?                @map("archived_at") @db.Timestamptz(3)
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  requirements   SiteMedicalRequirement[]
+  completions    MedicalCompletion[]
+
+  @@index([archivedAt, name])
+  @@map("medical")
+}
+
+model SiteMedicalRequirement {
+  siteId    String  @map("site_id") @db.Uuid
+  medicalId String  @map("medical_id") @db.Uuid
+  site      Site    @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  medical   Medical @relation(fields: [medicalId], references: [id], onDelete: Restrict)
+
+  @@id([siteId, medicalId])
+  @@index([medicalId])
+  @@map("site_medical_requirement")
+}
+
 model CourseCompletion {
   id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   employeeId            String    @map("employee_id") @db.Uuid
@@ -78,4 +105,25 @@ model CourseCompletion {
   @@index([employeeId, courseId, completedOn, recordedAt])
   @@index([courseId, voidedAt])
   @@map("course_completion")
+}
+
+model MedicalCompletion {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId            String    @map("employee_id") @db.Uuid
+  medicalId             String    @map("medical_id") @db.Uuid
+  completedOn           DateTime  @map("completed_on") @db.Date
+  expiresOn             DateTime  @map("expires_on") @db.Date
+  validityMonthsApplied Int       @map("validity_months_applied") @db.SmallInt
+  comment               String?   @db.VarChar(500)
+  recordedBySubject     String    @map("recorded_by_subject") @db.VarChar(255)
+  recordedAt            DateTime  @default(now()) @map("recorded_at") @db.Timestamptz(3)
+  voidedAt              DateTime? @map("voided_at") @db.Timestamptz(3)
+  voidedBySubject       String?   @map("voided_by_subject") @db.VarChar(255)
+  voidReason            String?   @map("void_reason") @db.VarChar(500)
+  employee              Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  medical               Medical   @relation(fields: [medicalId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, medicalId, completedOn, recordedAt])
+  @@index([medicalId, voidedAt])
+  @@map("medical_completion")
 }

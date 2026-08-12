@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildDatabaseUrl,
+  validateDatabaseConfiguration,
   validateProductionDatabaseUrl,
 } from './config.js';
 
@@ -82,5 +83,30 @@ test('production database URLs accept strict certificate verification', () => {
       'postgresql://app:secret@database.example/nme_training' +
         '?sslmode=require&sslaccept=strict&sslcert=%2Fetc%2Fpki%2Frds%2Fca.pem',
     ),
+  );
+});
+
+test('production rejects ambiguous direct and secret database credentials', () => {
+  assert.throws(
+    () =>
+      validateDatabaseConfiguration({
+        nodeEnv: 'production',
+        databaseUrl:
+          'postgresql://app:secret@database.example/nme_training' +
+          '?sslmode=require&sslaccept=strict&sslcert=%2Fetc%2Fpki%2Frds%2Fca.pem',
+        databaseSecretArn: 'arn:aws:secretsmanager:region:account:secret:runtime',
+      }),
+    /without DATABASE_URL/,
+  );
+});
+
+test('production still accepts a strict direct URL when no secret is configured', () => {
+  assert.doesNotThrow(() =>
+    validateDatabaseConfiguration({
+      nodeEnv: 'production',
+      databaseUrl:
+        'postgresql://app:secret@database.example/nme_training' +
+        '?sslmode=require&sslaccept=strict&sslcert=%2Fetc%2Fpki%2Frds%2Fca.pem',
+    }),
   );
 });

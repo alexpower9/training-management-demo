@@ -44,6 +44,7 @@ function employeeFixture(overrides = {}) {
     email: 'alex@example.com',
     archivedAt: null,
     latestCompletionOn: null,
+    latestMedicalCompletionOn: null,
     ...overrides,
     account,
   };
@@ -54,6 +55,7 @@ function mockEmployee(employee) {
   mocks.getEmployee.mockResolvedValue({
     ...employee,
     completions: employee.completions || [],
+    medicalCompletions: employee.medicalCompletions || [],
   });
 }
 
@@ -355,5 +357,35 @@ describe('ManageEmployees', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('Enter a valid email address.');
+  });
+
+  it('renders separate training and medical completion sections', async () => {
+    mocks.getEmployee.mockResolvedValue({
+      ...employeeFixture({
+        latestCompletionOn: '2026-01-01',
+        latestMedicalCompletionOn: '2026-02-01',
+      }),
+      completions: [],
+      medicalCompletions: [
+        {
+          id: 'medical-completion-1',
+          medical: { id: 'medical-1', name: 'Fitness to Work' },
+          completedOn: '2026-02-01',
+          expiresOn: '2027-02-01',
+          voidedAt: null,
+        },
+      ],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get('thead').text()).toContain('Latest training');
+    expect(wrapper.get('thead').text()).toContain('Latest medical');
+    await wrapper.get('tbody tr').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Training completion history');
+    expect(wrapper.text()).toContain('Medical completion history');
+    expect(wrapper.text()).toContain('Fitness to Work');
   });
 });

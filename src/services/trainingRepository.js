@@ -30,6 +30,8 @@ const apiRepository = {
   listSites: () => apiRequest('/sites'),
   listSiteCourses: (siteId, asOf) =>
     apiRequest(`/sites/${siteId}/courses`, { query: { asOf } }),
+  listSiteRequirements: (siteId, asOf) =>
+    apiRequest(`/sites/${siteId}/courses`, { query: { asOf } }),
   getSiteReadiness: (siteId, asOf) =>
     apiRequest(`/sites/${siteId}/readiness`, { query: { asOf } }),
 };
@@ -50,4 +52,5 @@ export const trainingRepository = useApi
           .flatMap((site) => getDemoSiteReadiness(site.id, asOf))
           .filter((summary) => summary.employee.id === employees[0].id);
       },
+      listSiteRequirements: demoRepository.listSiteCourses,
     };

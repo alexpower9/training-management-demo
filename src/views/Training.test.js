@@ -87,6 +87,20 @@ describe('Training', () => {
     expect(tableText).not.toContain('Sam Lee');
   });
 
+  it('gives owners the same broad readiness controls as administrators', async () => {
+    mocks.authState.role = 'owner';
+    const wrapper = mount(Training);
+    await flushPromises();
+
+    expect(mocks.listEmployees).toHaveBeenCalledOnce();
+    expect(mocks.listSites).toHaveBeenCalledOnce();
+    expect(wrapper.get('select[aria-label="Employee"]').exists()).toBe(true);
+
+    await wrapper.get('select[aria-label="Site"]').setValue('site-1');
+    await flushPromises();
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2);
+  });
+
   it('shows employee accounts only their selectable readiness rows', async () => {
     mocks.authState.role = 'employee';
     mocks.getMyReadiness.mockResolvedValue([
@@ -120,7 +134,7 @@ describe('Training', () => {
     await flushPromises();
 
     expect(wrapper.get('[role="alert"]').text()).toContain(
-      'not linked to an employee training record',
+      'not linked to an employee record',
     );
     expect(wrapper.text()).not.toContain('Forbidden');
   });

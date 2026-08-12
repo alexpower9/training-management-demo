@@ -13,6 +13,14 @@ import { addToast } from '@/composables/useToasts';
 import { formatDate } from '@/data/trainingDemoData';
 import { adminRepository } from '@/services/adminRepository';
 
+const props = defineProps({
+  resource: {
+    type: String,
+    default: 'course',
+    validator: (value) => ['course', 'medical'].includes(value),
+  },
+});
+
 const route = useRoute();
 const router = useRouter();
 const items = ref([]);
@@ -40,6 +48,11 @@ const form = reactive({
 });
 const initialForm = ref('');
 
+const isMedical = computed(() => props.resource === 'medical');
+const singular = computed(() => (isMedical.value ? 'medical' : 'course'));
+const plural = computed(() => (isMedical.value ? 'medicals' : 'courses'));
+const titleLabel = computed(() => (isMedical.value ? 'Medical' : 'Course'));
+
 const activeSites = computed(() =>
   siteOptions.value.filter((site) => !site.archivedAt),
 );
@@ -55,7 +68,9 @@ const allActiveSitesSelected = computed(
 );
 const formDirty = computed(() => JSON.stringify(form) !== initialForm.value);
 const drawerTitle = computed(() =>
-  formMode.value === 'create' ? 'Add course' : 'Edit course',
+  formMode.value === 'create'
+    ? `Add ${singular.value}`
+    : `Edit ${singular.value}`,
 );
 
 function setForm(values = {}) {
@@ -108,7 +123,7 @@ function assignedSiteSummary(course) {
 }
 
 function courseDetailSubtitle(course) {
-  if (!course) return 'Select a course to inspect its usage.';
+  if (!course) return `Select a ${singular.value} to inspect its usage.`;
   if (hasNoSiteRequirement(course)) return 'No site requirement';
   return `${course.requirements.length} assigned site(s)`;
 }
@@ -136,7 +151,10 @@ async function loadList() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const result = await adminRepository.listCourses({
+    const list = isMedical.value
+      ? adminRepository.listMedicals
+      : adminRepository.listCourses;
+    const result = await list({
       page: page.value,
       pageSize,
       search: search.value,
@@ -158,7 +176,9 @@ async function loadList() {
 async function selectCourse(id, updateRoute = true) {
   detailLoading.value = true;
   try {
-    selected.value = await adminRepository.getCourse(id);
+    selected.value = isMedical.value
+      ? await adminRepository.getMedical(id)
+      : await adminRepository.getCourse(id);
     if (updateRoute) syncQuery();
   } catch (error) {
     errorMessage.value = error.message;
@@ -189,12 +209,19 @@ async function saveCourse() {
       validityMonths: Number(form.validityMonths),
       siteIds: form.noSiteRequirement ? [] : form.siteIds,
     };
-    const saved =
-      formMode.value === 'create'
-        ? await adminRepository.createCourse(payload)
-        : await adminRepository.updateCourse(selected.value.id, payload);
+    const saved = formMode.value === 'create'
+      ? await (isMedical.value
+          ? adminRepository.createMedical(payload)
+          : adminRepository.createCourse(payload))
+      : await (isMedical.value
+          ? adminRepository.updateMedical(selected.value.id, payload)
+          : adminRepository.updateCourse(selected.value.id, payload));
     drawerOpen.value = false;
-    addToast(formMode.value === 'create' ? 'Course added.' : 'Course updated.');
+    addToast(
+      formMode.value === 'create'
+        ? `${titleLabel.value} added.`
+        : `${titleLabel.value} updated.`,
+    );
     await loadList();
     await selectCourse(saved.id);
   } catch (error) {
@@ -210,12 +237,15 @@ async function toggleArchive() {
   confirmBusy.value = true;
   const archived = !selected.value.archivedAt;
   try {
-    const updated = await adminRepository.setCourseArchived(
-      selected.value.id,
-      archived,
-    );
+    const updated = isMedical.value
+      ? await adminRepository.setMedicalArchived(selected.value.id, archived)
+      : await adminRepository.setCourseArchived(selected.value.id, archived);
     confirmOpen.value = false;
-    addToast(archived ? 'Course archived.' : 'Course restored.');
+    addToast(
+      archived
+        ? `${titleLabel.value} archived.`
+        : `${titleLabel.value} restored.`,
+    );
     await loadList();
     await selectCourse(updated.id);
   } catch (error) {
@@ -249,16 +279,16 @@ watch(includeArchived, applySearch);
   <section class="management-section">
     <div class="section-heading">
       <div>
-        <h2>Course catalogue</h2>
-        <p>Create courses, choose their required sites, and set automatic expiry.</p>
+        <h2>{{ titleLabel }} catalogue</h2>
+        <p>Create {{ plural }}, choose their required sites, and set automatic expiry.</p>
       </div>
-      <button class="primary-action" type="button" @click="openCreate">Add course</button>
+      <button class="primary-action" type="button" @click="openCreate">Add {{ singular }}</button>
     </div>
 
     <SearchToolbar
       v-model="search"
       v-model:include-archived="includeArchived"
-      placeholder="Search course name"
+      :placeholder="`Search ${singular} name`"
       @search="applySearch"
     />
 
@@ -266,12 +296,17 @@ watch(includeArchived, applySearch);
 
     <div class="workspace-grid">
       <section class="panel panel--large">
-        <div v-if="loading" class="loading-state">Loading courses...</div>
-        <ResourceTable v-else :has-items="Boolean(items.length)" empty-title="No courses found">
+        <div v-if="loading" class="loading-state">Loading {{ plural }}...</div>
+        <ResourceTable
+          v-else
+          :has-items="Boolean(items.length)"
+          :empty-title="`No ${plural} found`"
+          :empty-message="isMedical ? 'Add the first medical to begin tracking medical readiness.' : undefined"
+        >
           <table class="data-table data-table--interactive">
             <thead>
               <tr>
-                <th>Course</th>
+                <th>{{ titleLabel }}</th>
                 <th>Validity</th>
                 <th>Assigned sites</th>
                 <th>Status</th>
@@ -285,6 +320,7 @@ watch(includeArchived, applySearch);
                 tabindex="0"
                 @click="selectCourse(course.id)"
                 @keydown.enter="selectCourse(course.id)"
+                @keydown.space.prevent="selectCourse(course.id)"
               >
                 <td><strong>{{ course.name }}</strong></td>
                 <td>{{ course.validityMonths }} months</td>
@@ -306,7 +342,7 @@ watch(includeArchived, applySearch);
       </section>
 
       <DetailPanel
-        :title="selected?.name || 'Course detail'"
+        :title="selected?.name || `${titleLabel} detail`"
         :subtitle="courseDetailSubtitle(selected)"
       >
         <template v-if="selected" #actions>
@@ -318,7 +354,7 @@ watch(includeArchived, applySearch);
           </div>
         </template>
 
-        <div v-if="detailLoading" class="loading-state">Loading course...</div>
+        <div v-if="detailLoading" class="loading-state">Loading {{ singular }}...</div>
         <div v-else-if="selected" class="detail-stack">
           <div class="profile-strip">
             <div>
@@ -336,7 +372,7 @@ watch(includeArchived, applySearch);
             <div v-if="selected.requirements.length" class="stack-list">
               <article
                 v-for="requirement in selected.requirements"
-                :key="`${requirement.siteId}:${requirement.courseId}`"
+                :key="`${requirement.siteId}:${requirement.courseId || requirement.medicalId}`"
                 class="requirement-row"
               >
                 <div>
@@ -347,7 +383,7 @@ watch(includeArchived, applySearch);
             </div>
             <div v-else class="empty-state">
               <strong>No site requirement</strong>
-              <p>This course can be recorded as a completion, but it does not count toward site readiness.</p>
+              <p>This {{ singular }} can be recorded as a completion, but it does not count toward site readiness.</p>
             </div>
           </div>
 
@@ -374,7 +410,7 @@ watch(includeArchived, applySearch);
             </div>
             <div v-else class="empty-state">
               <strong>No completion history</strong>
-              <p>No employee completion has been recorded for this course.</p>
+              <p>No employee completion has been recorded for this {{ singular }}.</p>
             </div>
           </div>
         </div>
@@ -391,7 +427,7 @@ watch(includeArchived, applySearch);
     @save="saveCourse"
   >
     <label class="field">
-      <span>Course name</span>
+      <span>{{ titleLabel }} name</span>
       <input v-model="form.name" required maxlength="180" />
       <small v-if="fieldErrors.name" class="field-error">{{ fieldErrors.name[0] }}</small>
     </label>
@@ -424,7 +460,7 @@ watch(includeArchived, applySearch);
         {{ site.name }}{{ site.archivedAt ? ' (archived)' : '' }}
       </label>
       <small v-if="!siteOptions.length" class="field-help">
-        Add a site before creating a course.
+        Add a site before creating a {{ singular }}.
       </small>
       <small v-if="fieldErrors.siteIds" class="field-error">
         {{ fieldErrors.siteIds[0] }}
@@ -444,11 +480,11 @@ watch(includeArchived, applySearch);
 
   <ConfirmDialog
     :open="confirmOpen"
-    :title="selected?.archivedAt ? 'Restore course?' : 'Archive course?'"
+    :title="selected?.archivedAt ? `Restore ${singular}?` : `Archive ${singular}?`"
     :message="
       selected?.archivedAt
-        ? 'The course and its saved site assignments will return to readiness and completion entry.'
-        : 'The course will stop affecting readiness and new completions. Its site assignments and history are preserved.'
+        ? `The ${singular} and its saved site assignments will return to readiness and completion entry.`
+        : `The ${singular} will stop affecting readiness and new completions. Its site assignments and history are preserved.`
     "
     :confirm-label="selected?.archivedAt ? 'Restore' : 'Archive'"
     :danger="!selected?.archivedAt"

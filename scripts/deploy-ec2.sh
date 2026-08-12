@@ -55,6 +55,11 @@ commit="$(git rev-parse HEAD)"
 short_commit="$(git rev-parse --short=12 HEAD)"
 ref="$(git symbolic-ref --quiet --short HEAD || printf 'detached')"
 deployment_branch="${NME_DEPLOY_BRANCH:-$(git config --get nme.deployBranch || printf 'main')}"
+external_migrations="$(git config --get nme.externalMigrations || printf 'false')"
+
+if [[ "${external_migrations}" == 'true' && "${NME_DEPLOY_SKIP_MIGRATIONS:-0}" != '1' ]]; then
+  fail 'External migration mode requires NME_DEPLOY_SKIP_MIGRATIONS=1 and an exact-commit migration receipt.'
+fi
 
 if [[ "${ref}" != "${deployment_branch}" && "${NME_DEPLOY_ALLOW_REF:-0}" != '1' ]]; then
   fail "Refusing to deploy ${ref}; the configured deployment branch is ${deployment_branch}."
@@ -70,7 +75,15 @@ if [[ "${commit}" == "${last_successful_commit}" && "${NME_DEPLOY_FORCE:-0}" != 
   exit 0
 fi
 
-require_sudo_command "${systemctl_path}" start "${migration_service}"
+if [[ "${NME_DEPLOY_SKIP_MIGRATIONS:-0}" == '1' ]]; then
+  [[ "${NME_SCHEMA_COMPATIBILITY_CONFIRMED:-0}" == '1' ]] ||
+    fail 'Migration skipping requires NME_SCHEMA_COMPATIBILITY_CONFIRMED=1.'
+  receipt="${NME_EXTERNAL_MIGRATION_COMMIT:-}"
+  [[ "${receipt}" == "${commit}" ]] ||
+    fail 'NME_EXTERNAL_MIGRATION_COMMIT must equal the exact commit being deployed.'
+else
+  require_sudo_command "${systemctl_path}" start "${migration_service}"
+fi
 require_sudo_command "${systemctl_path}" restart "${api_service}"
 require_sudo_command "${systemctl_path}" start "${frontend_service}"
 
@@ -92,15 +105,19 @@ fi
 log 'Building the production frontend and API.'
 npm run build:production
 
-log 'Applying production database migrations.'
-sudo -n "${systemctl_path}" start "${migration_service}"
+if [[ "${NME_DEPLOY_SKIP_MIGRATIONS:-0}" == '1' ]]; then
+  log 'Skipping migrations after explicit schema-compatibility confirmation.'
+else
+  log 'Applying production database migrations.'
+  sudo -n "${systemctl_path}" start "${migration_service}"
+fi
 
 log 'Restarting the API.'
 sudo -n "${systemctl_path}" restart "${api_service}"
 
 api_healthy=0
 for attempt in {1..20}; do
-  if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+  if curl --fail --silent http://127.0.0.1:3000/ready >/dev/null; then
     api_healthy=1
     break
   fi
@@ -109,7 +126,7 @@ done
 
 if [[ "${api_healthy}" != '1' ]]; then
   "${systemctl_path}" --no-pager --full status "${api_service}" || true
-  fail 'The API did not become healthy after restart. Frontend assets were not published.'
+  fail 'The API or database did not become ready after restart. Frontend assets were not published.'
 fi
 
 log 'Publishing frontend assets.'

@@ -176,7 +176,7 @@ watch(includeArchived, applySearch);
     <div class="section-heading">
       <div>
         <h2>Sites</h2>
-        <p>Maintain sites and review the courses assigned from the course catalogue.</p>
+        <p>Maintain sites and review their training and medical requirements.</p>
       </div>
       <button class="primary-action" type="button" @click="openSiteForm()">Add site</button>
     </div>
@@ -199,6 +199,7 @@ watch(includeArchived, applySearch);
               <tr>
                 <th>Site</th>
                 <th>Required courses</th>
+                <th>Required medicals</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -210,12 +211,14 @@ watch(includeArchived, applySearch);
                 tabindex="0"
                 @click="selectSite(site.id)"
                 @keydown.enter="selectSite(site.id)"
+                @keydown.space.prevent="selectSite(site.id)"
               >
                 <td>
                   <strong>{{ site.name }}</strong>
                   <span>{{ site.timeZone }}</span>
                 </td>
                 <td>{{ site._count.requirements }}</td>
+                <td>{{ site._count.medicalRequirements || 0 }}</td>
                 <td><ArchiveBadge :archived="Boolean(site.archivedAt)" /></td>
               </tr>
             </tbody>
@@ -231,7 +234,7 @@ watch(includeArchived, applySearch);
 
       <DetailPanel
         :title="selected?.name || 'Site detail'"
-        :subtitle="selected ? selected.timeZone : 'Select a site to review its required courses.'"
+        :subtitle="selected ? selected.timeZone : 'Select a site to review its compliance requirements.'"
       >
         <template v-if="selected" #actions>
           <div class="inline-actions">
@@ -244,6 +247,13 @@ watch(includeArchived, applySearch);
 
         <div v-if="detailLoading" class="loading-state">Loading site...</div>
         <div v-else-if="selected" class="detail-stack">
+          <div
+            v-if="!selected.requirements.length && !selected.medicalRequirements?.length"
+            class="empty-state"
+          >
+            <strong>No site access requirements configured</strong>
+            <p>Employees are ineligible until at least one course or medical is assigned.</p>
+          </div>
           <div>
             <h3 class="detail-heading">Required courses</h3>
             <div v-if="selected.requirements.length" class="stack-list">
@@ -263,7 +273,29 @@ watch(includeArchived, applySearch);
             </div>
             <div v-else class="empty-state">
               <strong>No required courses</strong>
-              <p>Employees are ineligible for this site until courses are assigned.</p>
+              <p>Training is neutral for site access until courses are assigned.</p>
+            </div>
+          </div>
+          <div>
+            <h3 class="detail-heading">Required medicals</h3>
+            <div v-if="selected.medicalRequirements?.length" class="stack-list">
+              <article
+                v-for="requirement in selected.medicalRequirements"
+                :key="requirement.medicalId"
+                class="requirement-row"
+              >
+                <div>
+                  <strong>{{ requirement.medical.name }}</strong>
+                  <span>
+                    {{ requirement.medical.validityMonths }} months
+                    {{ requirement.medical.archivedAt ? ' · Archived medical' : '' }}
+                  </span>
+                </div>
+              </article>
+            </div>
+            <div v-else class="empty-state">
+              <strong>No required medicals</strong>
+              <p>Medical is neutral for site access until medicals are assigned.</p>
             </div>
           </div>
         </div>
@@ -302,8 +334,8 @@ watch(includeArchived, applySearch);
     :title="selected?.archivedAt ? 'Restore site?' : 'Archive site?'"
     :message="
       selected?.archivedAt
-        ? 'The site will return to readiness views with its course assignments preserved.'
-        : 'The site will leave readiness views. Its course assignments will be preserved.'
+        ? 'The site will return to readiness views with its course and medical assignments preserved.'
+        : 'The site will leave readiness views. Its course and medical assignments will be preserved.'
     "
     :confirm-label="selected?.archivedAt ? 'Restore' : 'Archive'"
     :danger="!selected?.archivedAt"

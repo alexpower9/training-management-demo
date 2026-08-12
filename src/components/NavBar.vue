@@ -5,7 +5,7 @@ import { auth, signOut } from '@/auth/auth';
 
 <template>
   <header class="app-header">
-    <RouterLink to="/training" class="brand-link" aria-label="Northern Mining Equipment training">
+    <RouterLink to="/training" class="brand-link" aria-label="Northern Mining Equipment compliance">
       <img :src="logoUrl" alt="Northern Mining Equipment" class="brand-logo" />
       <span class="brand-text">
         <span class="brand-name">Northern Mining Equipment</span>
@@ -16,6 +16,9 @@ import { auth, signOut } from '@/auth/auth';
       <nav class="app-nav" aria-label="Primary navigation">
         <RouterLink to="/training" class="nav-link" active-class="is-active">
           Training
+        </RouterLink>
+        <RouterLink to="/medical" class="nav-link" active-class="is-active">
+          Medical
         </RouterLink>
         <RouterLink
           v-if="auth.canManage.value"

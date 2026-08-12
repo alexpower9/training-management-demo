@@ -31,7 +31,7 @@ describe('ManageSites', () => {
       name: 'North Ridge',
       timeZone: 'America/St_Johns',
       archivedAt: null,
-      _count: { requirements: 1 },
+      _count: { requirements: 1, medicalRequirements: 1 },
     };
     mocks.listSites.mockResolvedValue({ items: [site], total: 1 });
     mocks.getSite.mockResolvedValue({
@@ -43,6 +43,18 @@ describe('ManageSites', () => {
           course: {
             id: 'course-1',
             name: 'First Aid',
+            validityMonths: 12,
+            archivedAt: null,
+          },
+        },
+      ],
+      medicalRequirements: [
+        {
+          siteId: 'site-1',
+          medicalId: 'medical-1',
+          medical: {
+            id: 'medical-1',
+            name: 'Fitness to Work',
             validityMonths: 12,
             archivedAt: null,
           },
@@ -70,6 +82,8 @@ describe('ManageSites', () => {
       query: { id: 'site-1' },
     });
     expect(wrapper.text()).toContain('First Aid');
+    expect(wrapper.text()).toContain('Fitness to Work');
+    expect(wrapper.text()).toContain('Required medicals');
     expect(wrapper.text()).not.toContain('Assign course');
     expect(wrapper.text()).not.toContain('Remove');
   });

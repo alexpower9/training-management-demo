@@ -5,7 +5,7 @@ const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const shouldRun = Boolean(testDatabaseUrl);
 
 test(
-  'PostgreSQL constraints and simplified course workflows work together',
+  'PostgreSQL constraints and compliance workflows work together',
   { skip: shouldRun ? false : 'Set TEST_DATABASE_URL and use npm run test:integration.' },
   async () => {
     const parsed = new URL(testDatabaseUrl!);
@@ -22,8 +22,11 @@ test(
       import('./database.js'),
     ]);
     const prisma = await getPrisma();
+    await prisma.medicalCompletion.deleteMany();
     await prisma.courseCompletion.deleteMany();
+    await prisma.siteMedicalRequirement.deleteMany();
     await prisma.siteCourseRequirement.deleteMany();
+    await prisma.medical.deleteMany();
     await prisma.site.deleteMany();
     await prisma.course.deleteMany();
     await prisma.employee.deleteMany();
@@ -274,6 +277,85 @@ test(
       });
       assert.equal(duplicateCourseResponse.statusCode, 409);
 
+      const noSiteMedicalResponse = await request(
+        'POST',
+        '/api/v1/admin/medicals',
+        {
+          name: 'No Site Medical',
+          validityMonths: 12,
+          siteIds: [],
+        },
+      );
+      assert.equal(noSiteMedicalResponse.statusCode, 201);
+      const noSiteMedical = noSiteMedicalResponse.json();
+      assert.deepEqual(noSiteMedical.requirements, []);
+
+      const invalidMedicalResponse = await request(
+        'POST',
+        '/api/v1/admin/medicals',
+        {
+          name: 'Invalid Medical',
+          validityMonths: 0,
+          siteIds: [site.id],
+        },
+      );
+      assert.equal(invalidMedicalResponse.statusCode, 400);
+
+      const duplicateMedicalSitesResponse = await request(
+        'POST',
+        '/api/v1/admin/medicals',
+        {
+          name: 'Duplicate Medical Sites',
+          validityMonths: 12,
+          siteIds: [site.id, site.id],
+        },
+      );
+      assert.equal(duplicateMedicalSitesResponse.statusCode, 400);
+
+      const medicalResponse = await request(
+        'POST',
+        '/api/v1/admin/medicals',
+        {
+          // Course and Medical namespaces are intentionally independent.
+          name: 'Calendar Month Safety',
+          validityMonths: 1,
+          siteIds: [site.id, secondSite.id],
+        },
+      );
+      assert.equal(medicalResponse.statusCode, 201);
+      const medical = medicalResponse.json();
+      assert.equal(medical.requirements.length, 2);
+
+      const duplicateMedicalResponse = await request(
+        'POST',
+        '/api/v1/admin/medicals',
+        {
+          name: 'calendar month safety',
+          validityMonths: 12,
+          siteIds: [site.id],
+        },
+      );
+      assert.equal(duplicateMedicalResponse.statusCode, 409);
+      assert.equal(duplicateMedicalResponse.json().code, 'MEDICAL_NAME_EXISTS');
+
+      const siteMedicalsResponse = await request(
+        'GET',
+        `/api/v1/sites/${site.id}/medicals`,
+      );
+      assert.equal(siteMedicalsResponse.statusCode, 200);
+      assert.deepEqual(
+        siteMedicalsResponse
+          .json()
+          .map((item: { id: string }) => item.id),
+        [medical.id],
+      );
+      assert.equal(
+        siteMedicalsResponse
+          .json()
+          .some((item: { id: string }) => item.id === noSiteMedical.id),
+        false,
+      );
+
       const futureSiteResponse = await request('POST', '/api/v1/admin/sites', {
         name: 'Future Site',
         timeZone: 'America/St_Johns',
@@ -385,6 +467,19 @@ test(
       );
       assert.equal(duplicateCompletionResponse.statusCode, 409);
 
+      await assert.rejects(
+        prisma.courseCompletion.update({
+          where: { id: blankCommentResponse.json().id },
+          data: {
+            comment: 'Rewritten while voiding',
+            voidedAt: new Date(),
+            voidedBySubject: 'integration-owner',
+            voidReason: 'Combined rewrite attempt',
+          },
+        }),
+        /Completion facts are immutable/,
+      );
+
       const updateResponse = await request(
         'PATCH',
         `/api/v1/admin/courses/${course.id}`,
@@ -463,6 +558,66 @@ test(
         ],
       });
 
+      const medicalCompletionResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-completions',
+        {
+          employeeId: compliantEmployee.id,
+          medicalId: medical.id,
+          completedOn: '2026-05-31',
+          comment: 'Medical certificate verified.',
+        },
+      );
+      assert.equal(medicalCompletionResponse.statusCode, 201);
+      assert.equal(medicalCompletionResponse.json().expiresOn, '2026-06-30');
+      assert.equal(medicalCompletionResponse.json().validityMonthsApplied, 1);
+      assert.equal(
+        medicalCompletionResponse.json().comment,
+        'Medical certificate verified.',
+      );
+
+      const noSiteMedicalCompletionResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-completions',
+        {
+          employeeId: employee.id,
+          medicalId: noSiteMedical.id,
+          completedOn: '2026-05-01',
+        },
+      );
+      assert.equal(noSiteMedicalCompletionResponse.statusCode, 201);
+
+      const duplicateMedicalCompletionResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-completions',
+        {
+          employeeId: compliantEmployee.id,
+          medicalId: medical.id,
+          completedOn: '2026-05-31',
+        },
+      );
+      assert.equal(duplicateMedicalCompletionResponse.statusCode, 409);
+      assert.equal(
+        duplicateMedicalCompletionResponse.json().code,
+        'MEDICAL_COMPLETION_EXISTS',
+      );
+
+      const medicalCompletionListResponse = await request(
+        'GET',
+        `/api/v1/admin/medical-completions?employeeId=${compliantEmployee.id}`,
+      );
+      assert.equal(medicalCompletionListResponse.statusCode, 200);
+      assert.equal(
+        medicalCompletionListResponse.json().items[0].comment,
+        'Medical certificate verified.',
+      );
+      assert.equal(
+        JSON.stringify(medicalCompletionListResponse.json()).includes(
+          'cognitoSubject',
+        ),
+        false,
+      );
+
       const readinessResponse = await request(
         'GET',
         `/api/v1/sites/${site.id}/readiness?asOf=2026-06-05`,
@@ -482,6 +637,82 @@ test(
             row.employee.name === 'Archived Employee',
         ),
         false,
+      );
+      const compliantTrainingSummary = readiness.find(
+        (row: { employee: { id: string } }) =>
+          row.employee.id === compliantEmployee.id,
+      );
+      assert.equal(compliantTrainingSummary.combinedAccess.status, 'expiring');
+      assert.equal(compliantTrainingSummary.combinedAccess.eligible, true);
+      assert.equal(compliantTrainingSummary.eligible, true);
+      assert.equal(compliantTrainingSummary.domainEligible, true);
+      assert.deepEqual(
+        compliantTrainingSummary.combinedAccess.blockingDomains,
+        [],
+      );
+      const expiringTrainingSummary = readiness.find(
+        (row: { employee: { id: string } }) =>
+          row.employee.id === expiringEmployee.id,
+      );
+      assert.equal(expiringTrainingSummary.status, 'expiring');
+      assert.equal(expiringTrainingSummary.combinedAccess.status, 'incomplete');
+      assert.equal(expiringTrainingSummary.combinedAccess.eligible, false);
+      assert.equal(expiringTrainingSummary.eligible, false);
+      assert.equal(expiringTrainingSummary.domainEligible, true);
+      assert.deepEqual(
+        expiringTrainingSummary.combinedAccess.blockingDomains,
+        ['medical'],
+      );
+
+      const medicalReadinessResponse = await request(
+        'GET',
+        `/api/v1/sites/${site.id}/medical-readiness?asOf=2026-06-05`,
+      );
+      assert.equal(medicalReadinessResponse.statusCode, 200);
+      const medicalReadiness = medicalReadinessResponse.json();
+      assert.equal(JSON.stringify(medicalReadiness).includes('comment'), false);
+      const compliantMedicalSummary = medicalReadiness.find(
+        (row: { employee: { id: string } }) =>
+          row.employee.id === compliantEmployee.id,
+      );
+      assert.equal(compliantMedicalSummary.status, 'expiring');
+      assert.equal(compliantMedicalSummary.domainEligible, true);
+      assert.equal(compliantMedicalSummary.eligible, true);
+      assert.equal(
+        compliantMedicalSummary.eligible,
+        compliantMedicalSummary.combinedAccess.eligible,
+      );
+      assert.equal(
+        JSON.stringify(medicalReadiness).includes(noSiteMedical.id),
+        false,
+      );
+
+      const compliantEmployeeDetail = await request(
+        'GET',
+        `/api/v1/admin/employees/${compliantEmployee.id}`,
+      );
+      assert.equal(compliantEmployeeDetail.statusCode, 200);
+      assert.equal(
+        compliantEmployeeDetail.json().medicalCompletions[0].medical.id,
+        medical.id,
+      );
+      assert.equal(
+        compliantEmployeeDetail.json().medicalCompletions[0].comment,
+        'Medical certificate verified.',
+      );
+
+      const siteDetailWithMedical = await request(
+        'GET',
+        `/api/v1/admin/sites/${site.id}`,
+      );
+      assert.equal(siteDetailWithMedical.statusCode, 200);
+      assert.deepEqual(
+        siteDetailWithMedical
+          .json()
+          .medicalRequirements.map(
+            (requirement: { medicalId: string }) => requirement.medicalId,
+          ),
+        [medical.id],
       );
 
       const employeeHeaders = {
@@ -515,11 +746,43 @@ test(
       assert.equal(JSON.stringify(selfReadiness).includes('voidedBySubject'), false);
       assert.equal(JSON.stringify(selfReadiness).includes('comment'), false);
 
+      const selfMedicalReadinessResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me/medical-readiness?asOf=2026-06-05',
+        headers: employeeHeaders,
+      });
+      assert.equal(selfMedicalReadinessResponse.statusCode, 200);
+      const selfMedicalReadiness = selfMedicalReadinessResponse.json();
+      assert.equal(
+        selfMedicalReadiness.every(
+          (summary: { employee: { id: string } }) =>
+            summary.employee.id === employee.id,
+        ),
+        true,
+      );
+      assert.equal(
+        JSON.stringify(selfMedicalReadiness).includes('comment'),
+        false,
+      );
+      const employeeSiteMedicalsResponse = await app.inject({
+        method: 'GET',
+        url: `/api/v1/sites/${site.id}/medicals`,
+        headers: employeeHeaders,
+      });
+      assert.equal(employeeSiteMedicalsResponse.statusCode, 200);
+      assert.equal(
+        JSON.stringify(employeeSiteMedicalsResponse.json()).includes('comment'),
+        false,
+      );
+
       for (const url of [
         '/api/v1/employees',
         `/api/v1/sites/${site.id}/readiness`,
+        `/api/v1/sites/${site.id}/medical-readiness`,
         '/api/v1/completions',
         '/api/v1/admin/employees',
+        '/api/v1/admin/medicals',
+        '/api/v1/admin/medical-completions',
       ]) {
         const response = await app.inject({
           method: 'GET',
@@ -539,6 +802,19 @@ test(
       });
       assert.equal(unlinkedResponse.statusCode, 403);
       assert.equal(unlinkedResponse.json().code, 'EMPLOYEE_ACCOUNT_NOT_LINKED');
+      const unlinkedMedicalCatalogueResponse = await app.inject({
+        method: 'GET',
+        url: `/api/v1/sites/${site.id}/medicals`,
+        headers: {
+          'x-demo-user-role': 'employee',
+          'x-demo-user-subject': '20000000-0000-4000-8000-000000000103',
+        },
+      });
+      assert.equal(unlinkedMedicalCatalogueResponse.statusCode, 403);
+      assert.equal(
+        unlinkedMedicalCatalogueResponse.json().code,
+        'EMPLOYEE_ACCOUNT_NOT_LINKED',
+      );
 
       const inactiveResponse = await app.inject({
         method: 'GET',
@@ -550,8 +826,40 @@ test(
       });
       assert.equal(inactiveResponse.statusCode, 403);
       assert.equal(inactiveResponse.json().code, 'EMPLOYEE_ACCOUNT_INACTIVE');
+      const inactiveMedicalCatalogueResponse = await app.inject({
+        method: 'GET',
+        url: `/api/v1/sites/${site.id}/medicals`,
+        headers: {
+          'x-demo-user-role': 'employee',
+          'x-demo-user-subject': accountEmployeeSubject,
+        },
+      });
+      assert.equal(inactiveMedicalCatalogueResponse.statusCode, 403);
+      assert.equal(
+        inactiveMedicalCatalogueResponse.json().code,
+        'EMPLOYEE_ACCOUNT_INACTIVE',
+      );
 
       await request('POST', `/api/v1/admin/sites/${site.id}/archive`);
+      const retainArchivedMedicalAssignmentResponse = await request(
+        'PATCH',
+        `/api/v1/admin/medicals/${medical.id}`,
+        {
+          name: 'Calendar Month Safety',
+          validityMonths: 1,
+          siteIds: [site.id, secondSite.id],
+        },
+      );
+      assert.equal(retainArchivedMedicalAssignmentResponse.statusCode, 200);
+      assert.deepEqual(
+        retainArchivedMedicalAssignmentResponse
+          .json()
+          .requirements.map(
+            (requirement: { siteId: string }) => requirement.siteId,
+          )
+          .sort(),
+        [site.id, secondSite.id].sort(),
+      );
       const retainArchivedAssignmentResponse = await request(
         'PATCH',
         `/api/v1/admin/courses/${course.id}`,
@@ -574,6 +882,38 @@ test(
       );
       assert.equal(archivedNewSelectionResponse.statusCode, 200);
       await request('POST', `/api/v1/admin/sites/${secondSite.id}/archive`);
+      const removeArchivedMedicalAssignmentResponse = await request(
+        'PATCH',
+        `/api/v1/admin/medicals/${medical.id}`,
+        {
+          name: 'Calendar Month Safety',
+          validityMonths: 1,
+          siteIds: [site.id],
+        },
+      );
+      assert.equal(removeArchivedMedicalAssignmentResponse.statusCode, 200);
+      assert.deepEqual(
+        removeArchivedMedicalAssignmentResponse
+          .json()
+          .requirements.map(
+            (requirement: { siteId: string }) => requirement.siteId,
+          ),
+        [site.id],
+      );
+      const archivedNewMedicalSelectionResponse = await request(
+        'PATCH',
+        `/api/v1/admin/medicals/${medical.id}`,
+        {
+          name: 'Calendar Month Safety',
+          validityMonths: 1,
+          siteIds: [site.id, secondSite.id],
+        },
+      );
+      assert.equal(archivedNewMedicalSelectionResponse.statusCode, 400);
+      assert.equal(
+        archivedNewMedicalSelectionResponse.json().code,
+        'ARCHIVED_MEDICAL_SITE_SELECTION',
+      );
       const removeArchivedSelectionResponse = await request(
         'PATCH',
         `/api/v1/admin/courses/${course.id}`,
@@ -595,6 +935,21 @@ test(
         },
       );
       assert.equal(newlyArchivedCourseResponse.statusCode, 400);
+
+      const newlyArchivedMedicalResponse = await request(
+        'POST',
+        '/api/v1/admin/medicals',
+        {
+          name: 'Archived Site Medical Rejection',
+          validityMonths: 12,
+          siteIds: [secondSite.id],
+        },
+      );
+      assert.equal(newlyArchivedMedicalResponse.statusCode, 400);
+      assert.equal(
+        newlyArchivedMedicalResponse.json().code,
+        'ARCHIVED_MEDICAL_SITE_SELECTION',
+      );
 
       await request('POST', `/api/v1/admin/sites/${site.id}/restore`);
       const archiveCourseResponse = await request(
@@ -626,7 +981,7 @@ test(
             (completion: { course: { id: string } }) =>
               completion.course.id === course.id,
           ),
-        false,
+        true,
       );
 
       const employeeListAfterCourseArchive = await request(
@@ -664,9 +1019,27 @@ test(
         suspendedReadinessResponse
           .json()
           .every(
-            (row: { status: string; eligible: boolean }) =>
-              row.status === 'noRequirements' && row.eligible === false,
+            (row: {
+              status: string;
+              eligible: boolean;
+              domainEligible: boolean;
+              combinedAccess: { eligible: boolean };
+            }) =>
+              row.status === 'noRequirements' &&
+              row.domainEligible === false &&
+              row.eligible === row.combinedAccess.eligible,
           ),
+      );
+      const compliantSuspendedTrainingSummary = suspendedReadinessResponse
+        .json()
+        .find(
+          (row: { employee: { id: string } }) =>
+            row.employee.id === compliantEmployee.id,
+      );
+      assert.equal(compliantSuspendedTrainingSummary.eligible, true);
+      assert.equal(
+        compliantSuspendedTrainingSummary.combinedAccess.status,
+        'expiring',
       );
 
       await request('POST', `/api/v1/admin/courses/${course.id}/restore`);
@@ -694,6 +1067,215 @@ test(
           .some((row: { status: string }) => row.status !== 'noRequirements'),
         true,
       );
+
+      const archiveMedicalResponse = await request(
+        'POST',
+        `/api/v1/admin/medicals/${medical.id}/archive`,
+      );
+      assert.equal(archiveMedicalResponse.statusCode, 200);
+
+      const archivedMedicalDetail = await request(
+        'GET',
+        `/api/v1/admin/medicals/${medical.id}`,
+      );
+      assert.equal(archivedMedicalDetail.statusCode, 200);
+      assert.deepEqual(
+        archivedMedicalDetail
+          .json()
+          .requirements.map(
+            (requirement: { siteId: string }) => requirement.siteId,
+          ),
+        [site.id],
+      );
+      assert.equal(
+        archivedMedicalDetail
+          .json()
+          .completions.some(
+            (completion: { id: string }) =>
+              completion.id === medicalCompletionResponse.json().id,
+          ),
+        true,
+      );
+
+      const employeeDetailAfterMedicalArchive = await request(
+        'GET',
+        `/api/v1/admin/employees/${compliantEmployee.id}`,
+      );
+      assert.equal(employeeDetailAfterMedicalArchive.statusCode, 200);
+      assert.equal(
+        employeeDetailAfterMedicalArchive
+          .json()
+          .medicalCompletions.some(
+            (completion: { medical: { id: string } }) =>
+              completion.medical.id === medical.id,
+          ),
+        true,
+      );
+
+      const employeeListAfterMedicalArchive = await request(
+        'GET',
+        '/api/v1/admin/employees?search=Compliant%20Employee',
+      );
+      assert.equal(employeeListAfterMedicalArchive.statusCode, 200);
+      assert.equal(
+        employeeListAfterMedicalArchive.json().items[0].latestMedicalCompletionOn,
+        null,
+      );
+
+      const siteListAfterMedicalArchive = await request(
+        'GET',
+        '/api/v1/admin/sites?search=Constraint%20Site',
+      );
+      assert.equal(siteListAfterMedicalArchive.statusCode, 200);
+      assert.equal(
+        siteListAfterMedicalArchive.json().items[0]._count.medicalRequirements,
+        0,
+      );
+      const siteDetailAfterMedicalArchive = await request(
+        'GET',
+        `/api/v1/admin/sites/${site.id}`,
+      );
+      assert.equal(siteDetailAfterMedicalArchive.statusCode, 200);
+      assert.deepEqual(siteDetailAfterMedicalArchive.json().medicalRequirements, []);
+
+      const medicalOptionsAfterArchive = await request(
+        'GET',
+        '/api/v1/admin/medical-options',
+      );
+      assert.equal(medicalOptionsAfterArchive.statusCode, 200);
+      assert.equal(
+        medicalOptionsAfterArchive
+          .json()
+          .some((option: { id: string }) => option.id === medical.id),
+        false,
+      );
+
+      const completionForArchivedMedicalResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-completions',
+        {
+          employeeId: compliantEmployee.id,
+          medicalId: medical.id,
+          completedOn: '2026-06-01',
+        },
+      );
+      assert.equal(completionForArchivedMedicalResponse.statusCode, 404);
+      assert.equal(
+        completionForArchivedMedicalResponse.json().code,
+        'MEDICAL_NOT_FOUND',
+      );
+
+      const suspendedMedicalReadinessResponse = await request(
+        'GET',
+        `/api/v1/sites/${site.id}/medical-readiness?asOf=2026-06-05`,
+      );
+      assert.equal(suspendedMedicalReadinessResponse.statusCode, 200);
+      assert.ok(
+        suspendedMedicalReadinessResponse
+          .json()
+          .every(
+            (row: {
+              status: string;
+              eligible: boolean;
+              domainEligible: boolean;
+              combinedAccess: { eligible: boolean };
+            }) =>
+              row.status === 'noRequirements' &&
+              row.domainEligible === false &&
+              row.eligible === row.combinedAccess.eligible,
+          ),
+      );
+      const expiringSuspendedMedicalSummary = suspendedMedicalReadinessResponse
+        .json()
+        .find(
+          (row: { employee: { id: string } }) =>
+            row.employee.id === expiringEmployee.id,
+        );
+      assert.equal(expiringSuspendedMedicalSummary.eligible, true);
+      assert.deepEqual(
+        expiringSuspendedMedicalSummary.combinedAccess.blockingDomains,
+        [],
+      );
+
+      const restoreMedicalResponse = await request(
+        'POST',
+        `/api/v1/admin/medicals/${medical.id}/restore`,
+      );
+      assert.equal(restoreMedicalResponse.statusCode, 200);
+      const medicalOptionsAfterRestore = await request(
+        'GET',
+        '/api/v1/admin/medical-options',
+      );
+      assert.equal(medicalOptionsAfterRestore.statusCode, 200);
+      assert.equal(
+        medicalOptionsAfterRestore
+          .json()
+          .some((option: { id: string }) => option.id === medical.id),
+        true,
+      );
+      const siteDetailAfterMedicalRestore = await request(
+        'GET',
+        `/api/v1/admin/sites/${site.id}`,
+      );
+      assert.equal(siteDetailAfterMedicalRestore.statusCode, 200);
+      assert.deepEqual(
+        siteDetailAfterMedicalRestore
+          .json()
+          .medicalRequirements.map(
+            (requirement: { medicalId: string }) => requirement.medicalId,
+          ),
+        [medical.id],
+      );
+      const restoredMedicalReadinessResponse = await request(
+        'GET',
+        `/api/v1/sites/${site.id}/medical-readiness?asOf=2026-06-05`,
+      );
+      assert.equal(restoredMedicalReadinessResponse.statusCode, 200);
+      const expiringRestoredMedicalSummary = restoredMedicalReadinessResponse
+        .json()
+        .find(
+          (row: { employee: { id: string } }) =>
+            row.employee.id === expiringEmployee.id,
+        );
+      assert.equal(expiringRestoredMedicalSummary.status, 'incomplete');
+      assert.equal(expiringRestoredMedicalSummary.domainEligible, false);
+      assert.equal(expiringRestoredMedicalSummary.eligible, false);
+      assert.deepEqual(
+        expiringRestoredMedicalSummary.combinedAccess.blockingDomains,
+        ['medical'],
+      );
+
+      const updateMedicalValidityResponse = await request(
+        'PATCH',
+        `/api/v1/admin/medicals/${medical.id}`,
+        {
+          name: 'Calendar Month Safety',
+          validityMonths: 2,
+          siteIds: [site.id],
+        },
+      );
+      assert.equal(updateMedicalValidityResponse.statusCode, 200);
+      const medicalRenewalResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-completions',
+        {
+          employeeId: compliantEmployee.id,
+          medicalId: medical.id,
+          completedOn: '2026-06-01',
+          comment: 'Renewal after validity update.',
+        },
+      );
+      assert.equal(medicalRenewalResponse.statusCode, 201);
+      assert.equal(medicalRenewalResponse.json().expiresOn, '2026-08-01');
+      assert.equal(medicalRenewalResponse.json().validityMonthsApplied, 2);
+      const originalMedicalCompletion = await prisma.medicalCompletion.findUnique({
+        where: { id: medicalCompletionResponse.json().id },
+      });
+      assert.equal(
+        originalMedicalCompletion?.expiresOn.toISOString().slice(0, 10),
+        '2026-06-30',
+      );
+      assert.equal(originalMedicalCompletion?.validityMonthsApplied, 1);
 
       await request(
         'POST',
@@ -736,6 +1318,120 @@ test(
       );
       assert.equal(voidResponse.statusCode, 200);
       assert.equal(voidResponse.json().voidReason, 'Incorrect certificate date');
+
+      const voidMedicalResponse = await request(
+        'POST',
+        `/api/v1/admin/medical-completions/${medicalCompletionResponse.json().id}/void`,
+        { reason: 'Incorrect medical date' },
+      );
+      assert.equal(voidMedicalResponse.statusCode, 200);
+      assert.equal(
+        voidMedicalResponse.json().voidReason,
+        'Incorrect medical date',
+      );
+
+      const secondVoidResponse = await request(
+        'POST',
+        `/api/v1/admin/completions/${completionResponse.json().id}/void`,
+        { reason: 'A second void attempt' },
+      );
+      assert.equal(secondVoidResponse.statusCode, 409);
+      assert.equal(secondVoidResponse.json().code, 'COMPLETION_ALREADY_VOIDED');
+      const secondMedicalVoidResponse = await request(
+        'POST',
+        `/api/v1/admin/medical-completions/${medicalCompletionResponse.json().id}/void`,
+        { reason: 'A second medical void attempt' },
+      );
+      assert.equal(secondMedicalVoidResponse.statusCode, 409);
+      assert.equal(
+        secondMedicalVoidResponse.json().code,
+        'MEDICAL_COMPLETION_ALREADY_VOIDED',
+      );
+
+      await assert.rejects(
+        prisma.courseCompletion.update({
+          where: { id: completionResponse.json().id },
+          data: { voidReason: 'Rewritten void reason' },
+        }),
+        /Voided completion history is immutable/,
+      );
+      await assert.rejects(
+        prisma.medicalCompletion.update({
+          where: { id: medicalCompletionResponse.json().id },
+          data: { voidedAt: null, voidedBySubject: null, voidReason: null },
+        }),
+        /Voided completion history is immutable/,
+      );
+      const replacementMedicalCompletionResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-completions',
+        {
+          employeeId: compliantEmployee.id,
+          medicalId: medical.id,
+          completedOn: '2026-05-31',
+        },
+      );
+      assert.equal(replacementMedicalCompletionResponse.statusCode, 201);
+
+      await prisma.employee.createMany({
+        data: Array.from({ length: 101 }, (_, index) => ({
+          displayName: `Option Employee ${String(index).padStart(3, '0')}`,
+          email: `option.employee.${index}@example.com`,
+          cognitoSubject: `30000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        })),
+      });
+      await prisma.course.createMany({
+        data: Array.from({ length: 101 }, (_, index) => ({
+          name: `Option Course ${String(index).padStart(3, '0')}`,
+          validityMonths: 12,
+        })),
+      });
+      await prisma.medical.createMany({
+        data: Array.from({ length: 101 }, (_, index) => ({
+          name: `Option Medical ${String(index).padStart(3, '0')}`,
+          validityMonths: 12,
+        })),
+      });
+      const employeeOptionsResponse = await request(
+        'GET',
+        '/api/v1/admin/employee-options',
+      );
+      const courseOptionsResponse = await request(
+        'GET',
+        '/api/v1/admin/course-options',
+      );
+      const medicalOptionsResponse = await request(
+        'GET',
+        '/api/v1/admin/medical-options',
+      );
+      assert.equal(employeeOptionsResponse.statusCode, 200);
+      assert.equal(courseOptionsResponse.statusCode, 200);
+      assert.equal(medicalOptionsResponse.statusCode, 200);
+      assert.equal(
+        employeeOptionsResponse
+          .json()
+          .some(
+            (option: { displayName: string }) =>
+              option.displayName === 'Option Employee 100',
+          ),
+        true,
+      );
+      assert.equal(
+        courseOptionsResponse
+          .json()
+          .some(
+            (option: { name: string }) => option.name === 'Option Course 100',
+          ),
+        true,
+      );
+      assert.equal(
+        medicalOptionsResponse
+          .json()
+          .some(
+            (option: { name: string }) => option.name === 'Option Medical 100',
+          ),
+        true,
+      );
     } finally {
       await app.close();
       await disconnectDatabase();

@@ -36,18 +36,34 @@ visudo_path="$(command -v visudo 2>/dev/null || printf '/usr/sbin/visudo')"
 [[ -x "${visudo_path}" ]] || fail 'Required command not found: visudo'
 sudoers_file="$(mktemp)"
 trap 'rm -f "${sudoers_file}"' EXIT
+external_migrations="${NME_EC2_EXTERNAL_MIGRATIONS:-0}"
 
-cat > "${sudoers_file}" <<EOF
-${deployment_user} ALL=(root) NOPASSWD: ${systemctl_path} start nme-migrate.service
-${deployment_user} ALL=(root) NOPASSWD: ${systemctl_path} restart nme-api.service
-${deployment_user} ALL=(root) NOPASSWD: ${systemctl_path} start nme-frontend-publish.service
-EOF
+if [[ "${external_migrations}" != '1' ]]; then
+  if ! getent passwd nme-migration >/dev/null; then
+    sudo useradd --system --home-dir /nonexistent --shell /sbin/nologin \
+      nme-migration
+  fi
+  sudo usermod --append --groups nme-training nme-migration
+  sudo -u nme-migration test -r /etc/nme-training/migration.env ||
+    fail 'nme-migration cannot read /etc/nme-training/migration.env; complete the migration credential setup first.'
+  printf '%s\n' \
+    "${deployment_user} ALL=(root) NOPASSWD: ${systemctl_path} start nme-migrate.service" \
+    >> "${sudoers_file}"
+fi
+printf '%s\n' \
+  "${deployment_user} ALL=(root) NOPASSWD: ${systemctl_path} restart nme-api.service" \
+  "${deployment_user} ALL=(root) NOPASSWD: ${systemctl_path} start nme-frontend-publish.service" \
+  >> "${sudoers_file}"
 
 sudo "${visudo_path}" -cf "${sudoers_file}"
 sudo install -o root -g root -m 0440 \
   "${sudoers_file}" "/etc/sudoers.d/nme-training-deploy-${deployment_user}"
 
-for unit in nme-api.service nme-migrate.service nme-frontend-publish.service; do
+units=(nme-api.service nme-frontend-publish.service)
+if [[ "${external_migrations}" != '1' ]]; then
+  units+=(nme-migrate.service)
+fi
+for unit in "${units[@]}"; do
   sudo install -o root -g root -m 0644 \
     "deploy/${unit}" "/etc/systemd/system/${unit}"
 done
@@ -61,7 +77,17 @@ sudo systemctl enable nme-api.service
 
 git config core.hooksPath .githooks
 git config nme.deployBranch "${deployment_branch}"
+if [[ "${external_migrations}" == '1' ]]; then
+  git config nme.externalMigrations true
+else
+  git config --unset-all nme.externalMigrations 2>/dev/null || true
+fi
 mkdir -p .deployment
 
-log "Installed deployment units and enabled ${deployment_branch} deployment hooks for ${deployment_user}."
-log 'Run npm run deploy:ec2 once to perform the first deployment.'
+if [[ "${external_migrations}" == '1' ]]; then
+  log "Installed external-migration deployment units for ${deployment_user}."
+  log 'Automatic Git-hook deployment is disabled; deploy with the exact-commit migration receipt.'
+else
+  log "Installed deployment units and enabled ${deployment_branch} deployment hooks for ${deployment_user}."
+  log 'Run npm run deploy:ec2 once to perform the first deployment.'
+fi

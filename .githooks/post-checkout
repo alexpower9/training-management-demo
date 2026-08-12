@@ -11,4 +11,9 @@ current_branch="$(git symbolic-ref --quiet --short HEAD || true)"
 deployment_branch="$(git config --get nme.deployBranch || printf 'main')"
 [[ "${current_branch}" == "${deployment_branch}" ]] || exit 0
 
+if [[ "$(git config --get nme.externalMigrations || printf 'false')" == 'true' ]]; then
+  printf '[deploy] External migration mode requires an approved per-commit deployment; auto-deploy skipped.\n'
+  exit 0
+fi
+
 NME_AUTO_DEPLOY_TRIGGER=post-checkout npm run deploy:ec2

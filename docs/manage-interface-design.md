@@ -4,14 +4,17 @@ Status: implemented for the simplified site-based workspace.
 
 ## Navigation
 
-The `/manage` workspace contains four record-management sections:
+Administrators and owners share five record-management sections in
+`/manage`:
 
 1. Employees
 2. Sites
 3. Courses
-4. Completions
+4. Medicals
+5. Completions
 
-Owners also receive a fifth, owner-only Administrators section.
+Owners also receive an additional owner-only Administrators section. It is the
+sixth section for owners and is not shown to administrators.
 
 `/manage` redirects to `/manage/employees`. Overview, customer, and audit-log
 screens are not part of the product.
@@ -23,6 +26,7 @@ Routes:
 /manage/sites
 /manage/sites/:siteId
 /manage/courses
+/manage/medicals
 /manage/completions
 /manage/administrators
 ```
@@ -58,12 +62,14 @@ An employee contains only:
 - email
 - required Cognito account identity
 - active or archived state
-- completion history
+- separate Training and Medical completion history
 
-The list shows name, email, latest completion date, Cognito account state, and
-archive state. Search is by name or email. The detail panel supports edit,
-archive/restore, invitation resend when eligible, quick completion entry,
-current training, and full completion history.
+The list shows name, email, latest Training completion date, latest Medical
+completion date, Cognito account state, and archive state. Search is by name or
+email. The detail panel supports edit, archive/restore, invitation resend when
+eligible, separate Training and Medical quick-entry links, and separate
+completion-history sections. Quick-entry links open the matching mode of
+Manage Completions with the employee preselected.
 
 Adding an employee requires name and email for administrators and owners. The
 API creates the Cognito user with invitation delivery initially suppressed,
@@ -92,8 +98,9 @@ cooldown. Archived employees and disabled, confirmed, missing,
 email-mismatched, or otherwise ineligible accounts cannot be resent. The browser
 never receives a temporary password or Cognito subject.
 
-Employee names are not unique. Archiving removes an employee from Training
-readiness without removing historical completions or deleting the Cognito user.
+Employee names are not unique. Archiving removes an employee from Training and
+Medical readiness without removing either completion history or deleting the
+Cognito user.
 
 ## Administrators
 
@@ -113,6 +120,7 @@ The list shows:
 
 - site name and time zone
 - required-course count
+- required-medical count
 - active or archived state
 
 The detail panel supports:
@@ -120,15 +128,19 @@ The detail panel supports:
 - editing name and IANA time zone
 - archive and restore
 - viewing the current required-course list
+- viewing the current required-medical list
 
-Assignments are read-only in the Sites workspace and are managed from Course
-Add/Edit. They have no effective dates or warning-period fields.
+Assignments are read-only in the Sites workspace. Course assignments are
+managed from Course Add/Edit and Medical assignments from Medical Add/Edit.
+Neither assignment type has effective dates or warning-period fields.
 
-Site archive preserves assignments. Archived sites are absent from Training,
-and restoring a site makes its previous requirements active again.
+Site archive preserves both assignment sets. Archived sites are absent from
+Training and Medical, and restoring a site makes its previous requirements
+active again.
 
-A site with no assigned courses clearly states that all employees are
-ineligible until courses are assigned.
+An empty Training or Medical section states that the domain is neutral for site
+access. A site with neither courses nor medicals clearly states that all
+employees are ineligible until at least one requirement is assigned.
 
 ## Courses
 
@@ -155,50 +167,104 @@ Course names are permanently unique case-insensitively. Archiving preserves
 site assignments while removing the course from readiness and new completion
 entry. Restoring reactivates the saved assignments.
 
+## Medicals
+
+Medicals use the same configurable catalogue workspace as Courses, with
+Medical terminology and separate APIs and database tables. The list and detail
+show:
+
+- name
+- validity from 1 through 120 months
+- assigned-site names and count, or `No Site Requirement`
+- active or archived state
+- recent Medical completion history and comments
+
+Medical Add/Edit follows the same site-selection rules as Course Add/Edit.
+One assigned site represents a site-specific medical, multiple sites represent
+a shared medical, and no assigned sites track a medical without affecting site
+readiness. “Select all” captures only the active sites available at that time.
+
+Medical names are permanently unique case-insensitively within the Medical
+catalogue. The Medical and Course namespaces are independent, so the same name
+may exist once in each. Archiving a medical preserves its assignments and
+completion history while removing it from readiness and new completion entry;
+restore reactivates the saved assignments.
+
 ## Completions
+
+The section has Training and Medical modes selected by
+`type=training|medical`. A missing or invalid value defaults to Training so
+existing links remain compatible. Each mode has its own correctly paginated
+history and uses the matching catalogue, option list, completion table, and
+API; the same entry, expiry, renewal, comment, and void rules apply to both.
+
+Changing modes preserves search and `Show voided`, then resets the page,
+selected completion, open drawers and dialogs, and incompatible course or
+medical prefills. Employee quick-entry links include both the mode and employee
+ID. Completion option endpoints return every active employee and every active
+item rather than truncating selection at the first page of records.
 
 Completion entry is optimized for the common workflow:
 
 1. Choose an employee.
-2. Choose an active course.
+2. Choose an active course or medical for the selected mode.
 3. Enter the completion date.
 4. Optionally add a short comment.
 5. Review the automatically calculated expiry.
 6. Save.
 
-Calculated expiry previews the course validity period and month-end clamping.
-The saved validity snapshot prevents later course changes from rewriting
-existing completion expiry.
+Calculated expiry previews the selected course or medical validity period and
+month-end clamping. The saved validity snapshot prevents later catalogue
+changes from rewriting existing completion expiry.
 
-History can be searched and filtered by employee, course, and void state.
-Comments appear in completion detail and can be opened from compact history rows
-without changing the default list layout.
+History can be searched and filtered by employee, active mode item, and void
+state. Comments appear in completion detail and can be opened from compact
+history rows without changing the default list layout. They are management
+data visible to administrators and owners, never employee readiness data.
 Completion rows are not edited:
 
-- Renewal opens a new entry prefilled with employee and course.
+- Renewal opens a new entry in the active mode, prefilled with the employee and
+  corresponding course or medical.
 - Void requires a reason and preserves the original row.
 
 Bulk entry, attachments, and spreadsheet import remain outside v1.
 
-## Training Workspace
+## Training And Medical Workspaces
 
-The Training workspace filters directly by Site. It does not display customer,
-region, job title, crew, or home-base fields.
+`Training`, `Medical`, and `Manage` are separate primary tabs, with Medical
+between Training and Manage. `/training` remains the default authenticated
+route, and `/medical` opens the Medical workspace. Training and Medical are
+thin configurations of the same readiness workspace and filter directly by
+Site. Neither displays customer, region, job title, crew, or home-base fields.
 
-Administrators retain the all-employee dashboard. Employee accounts receive a
-self-service dashboard containing only their own readiness across active sites.
-The self-service API derives the employee from the verified Cognito subject and
-does not accept an employee ID from the browser.
+Administrators and owners receive the same all-employee dashboard. Employee
+accounts receive a self-service dashboard containing only their own readiness
+across active sites. The self-service APIs derive the employee from the
+verified Cognito subject and do not accept an employee ID from the browser.
 
-For the selected active site, every active employee is displayed with:
+For the selected active site, each visible employee is displayed with:
 
-- overall readiness status
-- eligibility
-- each required course
+- domain readiness status
+- combined site-access eligibility across Training and Medical
+- each required course in Training or required medical in Medical
 - completion and expiry detail
 
-The global expiring threshold is 45 days. Sites with no assigned courses show
-`noRequirements` and ineligible employees.
+Domain status and `Site access` are separate indicators. Detail panels explain
+whether access is blocked by Training, Medical, both, or by the absence of all
+site requirements. Expiring requirements use warning styling but remain
+eligible. The global expiring threshold is 45 days.
+
+Site, employee, requirement, and status filters change only visible rows in the
+active domain. They do not recalculate server-provided combined access from a
+filtered subset. A domain with no requirements is neutral to site access. An
+empty Medical catalogue therefore still shows `No Requirements` Medical rows
+and Training-derived combined access. Sites with no Training or Medical
+requirements show `noRequirements` and ineligible employees.
+
+Readiness responses contain status, completion date, and expiry data needed by
+the workspace. Employee responses omit completion comments, recording actors,
+and void metadata; those fields remain available only in administrator and
+owner management views.
 
 ## API Failure Behavior
 
@@ -220,22 +286,30 @@ There are no optimistic concurrency version fields or edit-conflict flows.
 | Employee | Yes, with Cognito invitation | Name | Archive/restore; resend pending invitation | No |
 | Site | Yes | Name/time zone | Archive/restore | No |
 | Course | Yes | Name/validity/sites | Archive/restore | No |
-| Site assignment | Through course | Through course | Preserved on archive | No |
-| Completion | Yes | No | Void with reason | No |
+| Medical | Yes | Name/validity/sites | Archive/restore | No |
+| Course site assignment | Through course | Through course | Preserved on archive | No |
+| Medical site assignment | Through medical | Through medical | Preserved on archive | No |
+| Course completion | Yes | No | Renew with a new row; void with reason | No |
+| Medical completion | Yes | No | Renew with a new row; void with reason | No |
 
-Course updates replace the current site assignment set atomically.
+Course and Medical updates replace their own current site assignment set
+atomically without affecting the other domain.
 
 ## Validation And Safeguards
 
 - Normalize and validate required text fields on the API.
 - Enforce active site-name uniqueness case-insensitively.
-- Enforce permanent course-name uniqueness case-insensitively.
-- Require at least one unique site selection per course.
+- Enforce permanent, domain-specific Course and Medical name uniqueness
+  case-insensitively while allowing the same name across domains.
+- Require each catalogue form to choose unique sites or explicitly choose
+  `No Site Requirement`.
 - Reject newly selected archived sites while allowing existing archived
   assignments to be retained or removed.
-- Preserve assignments when a site or course is archived.
-- Preview calculated expiry using required course validity.
-- Reject duplicate non-voided completions.
+- Preserve both assignment types when a site, course, or medical is archived.
+- Require Course and Medical validity to be an integer from 1 through 120
+  months and preview calculated expiry from the matching type.
+- Reject duplicate non-voided employee, item, and completion-date occurrences
+  independently in each domain.
 - Require a reason when voiding a completion.
 
 ## Accessibility And Responsive Behavior
@@ -245,4 +319,6 @@ dialog roles and labelled controls. Status is communicated with text as well
 as color.
 
 On smaller screens, list/detail layouts collapse to one column, toolbars stack,
-and primary actions become full width.
+and primary actions become full width. The primary navigation retains usable
+touch targets for Training, Medical, and Manage without horizontal page
+overflow.

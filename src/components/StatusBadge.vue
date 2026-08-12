@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { statusMeta } from '@/data/trainingDemoData';
+import { statusMeta } from '@/utils/readiness';
 
 const props = defineProps({
   status: {

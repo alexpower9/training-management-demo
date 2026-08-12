@@ -1,4 +1,12 @@
 import demoData from './trainingDemoData.json' with { type: 'json' };
+import {
+  getWorstStatus,
+  sortReadiness,
+  statusMeta,
+  summarizeReadiness,
+} from '@/utils/readiness';
+
+export { getWorstStatus, sortReadiness, statusMeta };
 
 export const referenceDate = demoData.referenceDate;
 
@@ -47,22 +55,6 @@ export const completions = employees.flatMap((employee) =>
   }),
 );
 
-export const statusMeta = {
-  noRequirements: { label: 'No Requirements', tone: 'neutral' },
-  compliant: { label: 'Compliant', tone: 'success' },
-  expiring: { label: 'Expiring Soon', tone: 'warning' },
-  incomplete: { label: 'Incomplete', tone: 'neutral' },
-  overdue: { label: 'Overdue', tone: 'danger' },
-};
-
-const statusRank = {
-  noRequirements: -1,
-  compliant: 0,
-  expiring: 1,
-  incomplete: 2,
-  overdue: 3,
-};
-
 function toDate(dateString) {
   return dateString ? new Date(`${dateString}T00:00:00Z`) : null;
 }
@@ -82,13 +74,6 @@ export function formatDate(dateString) {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(toDate(dateString));
-}
-
-export function getWorstStatus(statuses) {
-  return statuses.reduce(
-    (worst, status) => (statusRank[status] > statusRank[worst] ? status : worst),
-    'compliant',
-  );
 }
 
 function latestCompletion(employeeId, courseId) {
@@ -146,46 +131,28 @@ export function getDemoSiteReadiness(siteId, asOf = referenceDate) {
         };
       });
 
-      return summarizeEmployeeReadiness(employee, site, courseRows);
+      const summary = summarizeEmployeeReadiness(employee, site, courseRows);
+      const combinedAccess = {
+        status: summary.status,
+        eligible: summary.eligible,
+        requiredCount: summary.requiredCount,
+        completedCount: summary.completedCount,
+        expiringCount: summary.expiringCount,
+        blockingDomains: ['incomplete', 'overdue'].includes(summary.status)
+          ? ['training']
+          : [],
+      };
+      return {
+        ...summary,
+        eligible: combinedAccess.eligible,
+        domainEligible: summary.eligible,
+        combinedAccess,
+      };
     })
     .sort(sortReadiness);
 }
 
 export function summarizeEmployeeReadiness(employee, site, courseRows) {
-  if (!courseRows.length) {
-    return {
-      id: `${employee.id}-${site.id}`,
-      employee,
-      site,
-      courses: [],
-      requiredCount: 0,
-      completedCount: 0,
-      expiringCount: 0,
-      status: 'noRequirements',
-      eligible: false,
-    };
-  }
-
-  const statuses = courseRows.map((row) => row.status);
-  return {
-    id: `${employee.id}-${site.id}`,
-    employee,
-    site,
-    courses: courseRows,
-    requiredCount: courseRows.length,
-    completedCount: courseRows.filter((row) =>
-      ['compliant', 'expiring'].includes(row.status),
-    ).length,
-    expiringCount: courseRows.filter((row) => row.status === 'expiring').length,
-    status: getWorstStatus(statuses),
-    eligible: statuses.every((status) => ['compliant', 'expiring'].includes(status)),
-  };
-}
-
-export function sortReadiness(a, b) {
-  const eligibilityDelta = Number(a.eligible) - Number(b.eligible);
-  if (eligibilityDelta !== 0) return eligibilityDelta;
-  const statusDelta = statusRank[b.status] - statusRank[a.status];
-  if (statusDelta !== 0) return statusDelta;
-  return a.employee.name.localeCompare(b.employee.name);
+  const summary = summarizeReadiness(employee, site, courseRows);
+  return { ...summary, courses: courseRows };
 }

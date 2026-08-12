@@ -1,12 +1,12 @@
-# NME Training Compliance
+# NME Training and Medical Compliance
 
-Internal training-compliance application for Northern Mining Equipment.
+Internal training and medical-compliance application for Northern Mining Equipment.
 
 ## Application Structure
 
-- `src/`: Vue training and management workspaces with Cognito authentication.
+- `src/`: Vue Training, Medical, and management workspaces with Cognito authentication.
 - `server/`: Fastify TypeScript API with Cognito JWT verification and Prisma.
-- `server/prisma/`: Five-table PostgreSQL schema, custom migration, and canonical demo seed.
+- `server/prisma/`: Eight-table PostgreSQL schema, additive migrations, and canonical demo seed.
 - `deploy/`: Nginx and systemd templates for an EC2 deployment.
 
 The browser never connects directly to PostgreSQL. Production traffic follows:
@@ -24,9 +24,9 @@ npm install
 ```
 
 Copy `.env.example` to `.env` for the frontend and `server/.env.example` to
-`server/.env`. Development authentication defaults to an administrator. Both
-Training and Management use the API by default so management changes are
-immediately reflected in site readiness.
+`server/.env`. Development authentication defaults to an administrator.
+Training, Medical, and Management use the API by default so management changes
+are immediately reflected in site readiness.
 
 Start PostgreSQL 17, apply the migration, and seed the canonical dataset:
 
@@ -44,7 +44,14 @@ npm run dev:api
 npm run dev
 ```
 
+The Training and Medical workspaces are available at `/training` and `/medical`.
 The management workspace is available at `/manage`.
+
+Medical catalogue, site-requirement, and completion records use independent
+tables while sharing employees and sites with Training. The canonical seed
+deliberately starts the Medical catalogue empty. Site access requires every
+configured course and medical to be current; a domain with no requirements is
+neutral, while a site with no requirements in either domain remains ineligible.
 
 ## Verification
 
@@ -105,9 +112,10 @@ Development authentication emulates newly created Cognito accounts only in the r
 process. Seeded employees show Status unavailable, and restarting the API clears locally emulated
 account status and resend eligibility. Production Cognito state is not affected.
 
-The owner can also invite new administrators from Manage Administrators. Active employees can
-access only `/api/v1/me/readiness`, which returns their own readiness across active sites. Missing,
-unmatched, or archived employee identities are denied without receiving training data.
+The owner can also invite new administrators from Manage Administrators. Active employees use
+`/api/v1/me/readiness` and `/api/v1/me/medical-readiness`, which return only their own readiness
+across active sites. Missing, unmatched, or archived employee identities are denied without
+receiving compliance data.
 
 For local employee mode, use:
 
@@ -133,10 +141,24 @@ npm run build:production
 The production build preflight rejects development authentication, placeholder
 Cognito values, and invalid callback URLs.
 
-The API can receive `DATABASE_URL` directly or retrieve an RDS secret using `DATABASE_SECRET_ARN`
-and the EC2 instance role. Secret-based production connections also require
-`RDS_CA_CERT_PATH` and use strict certificate verification. Keep RDS in private
-subnets and allow port 5432 only from the API instance security group.
+Local development can use `DATABASE_URL`. Production must retrieve
+least-privilege runtime credentials using `DATABASE_SECRET_ARN`; remove any
+persistent direct URL from API environment files, systemd overrides, and shell
+profiles. Production startup rejects configuring both sources. Production
+migrations require a distinct
+`MIGRATION_DATABASE_SECRET_ARN` and database-owner role. The protected
+migration command applies migrations, grants the runtime role only the
+documented eight-table DML allowlist, and reconnects with the runtime secret to
+verify those privileges before the API restarts. Secret-based production
+connections also require `RDS_CA_CERT_PATH` and use strict certificate
+verification. Keep this application in a dedicated database and `public`
+schema on private RDS subnets, with port 5432 allowed only from approved
+application or migration runners.
+
+For the strongest credential boundary, run migrations in a protected
+CI/CodeBuild job with its own IAM role and let EC2 retrieve only the runtime
+secret. The same-EC2 one-shot migration unit is supported as an initial
+fallback and runs under a separate `nme-migration` system identity.
 
 See [Production Deployment Runbook](docs/production-deployment-runbook.md) for
 the complete local, staging, Cognito, RDS, EC2, DNS, TLS, monitoring, backup,
@@ -152,13 +174,28 @@ npm run deploy:ec2:setup
 npm run deploy:ec2
 ```
 
-Future fast-forward updates can be fetched and deployed with:
+When migrations run only in protected CI/CodeBuild and no migration credential
+exists on EC2, use `NME_EC2_EXTERNAL_MIGRATIONS=1 npm run deploy:ec2:setup`,
+then deploy with the migration-skip and compatibility-confirmation guards below.
+
+In same-host migration mode, future fast-forward updates can be fetched and
+deployed with:
 
 ```sh
 npm run deploy:ec2:update
 ```
 
-The installed hooks pin the current branch as the production branch and run
-after a successful `git pull` on it or a switch back to it. Deployments require
+When a protected migration job has already succeeded for the exact release,
+first pull with `NME_SKIP_AUTO_DEPLOY=1 git pull --ff-only`, then deploy the
+application with
+`NME_DEPLOY_SKIP_MIGRATIONS=1 NME_SCHEMA_COMPATIBILITY_CONFIRMED=1 NME_EXTERNAL_MIGRATION_COMMIT=$(git rev-parse HEAD) npm run deploy:ec2`. Use the same guard for an
+application rollback only after verifying the older artifact against the
+currently migrated schema; database migrations are not rolled back with the
+application. External-migration setup disables automatic Git-hook deployment
+because every release needs an approved receipt for its exact commit.
+
+In same-host mode, the installed hooks pin the current branch as the production
+branch and run after a successful `git pull` on it or a switch back to it.
+External mode deliberately skips those automatic deployments. Deployments require
 a clean worktree, are serialized with a lock, and record the successful commit
 in `.deployment/deployments.log`.

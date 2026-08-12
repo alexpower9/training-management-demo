@@ -11,6 +11,7 @@ const listQuery = (options = {}) => ({
 export const adminRepository = {
   listEmployees: (options) =>
     apiRequest('/admin/employees', { query: listQuery(options) }),
+  listEmployeeOptions: () => apiRequest('/admin/employee-options'),
   getEmployee: (id) => apiRequest(`/admin/employees/${id}`),
   createEmployee: (body) =>
     apiRequest('/admin/employees', { method: 'POST', body }),
@@ -35,6 +36,7 @@ export const adminRepository = {
     }),
   listCourses: (options) =>
     apiRequest('/admin/courses', { query: listQuery(options) }),
+  listCourseOptions: () => apiRequest('/admin/course-options'),
   getCourse: (id) => apiRequest(`/admin/courses/${id}`),
   createCourse: (body) => apiRequest('/admin/courses', { method: 'POST', body }),
   updateCourse: (id, body) =>
@@ -44,12 +46,34 @@ export const adminRepository = {
       method: 'POST',
     }),
 
+  listMedicals: (options) =>
+    apiRequest('/admin/medicals', { query: listQuery(options) }),
+  listMedicalOptions: () => apiRequest('/admin/medical-options'),
+  getMedical: (id) => apiRequest(`/admin/medicals/${id}`),
+  createMedical: (body) => apiRequest('/admin/medicals', { method: 'POST', body }),
+  updateMedical: (id, body) =>
+    apiRequest(`/admin/medicals/${id}`, { method: 'PATCH', body }),
+  setMedicalArchived: (id, archived) =>
+    apiRequest(`/admin/medicals/${id}/${archived ? 'archive' : 'restore'}`, {
+      method: 'POST',
+    }),
+
   listCompletions: (options) =>
     apiRequest('/admin/completions', { query: listQuery(options) }),
   createCompletion: (body) =>
     apiRequest('/admin/completions', { method: 'POST', body }),
   voidCompletion: (id, reason) =>
     apiRequest(`/admin/completions/${id}/void`, {
+      method: 'POST',
+      body: { reason },
+    }),
+
+  listMedicalCompletions: (options) =>
+    apiRequest('/admin/medical-completions', { query: listQuery(options) }),
+  createMedicalCompletion: (body) =>
+    apiRequest('/admin/medical-completions', { method: 'POST', body }),
+  voidMedicalCompletion: (id, reason) =>
+    apiRequest(`/admin/medical-completions/${id}/void`, {
       method: 'POST',
       body: { reason },
     }),

@@ -26,6 +26,7 @@ import {
   paginationQuery,
   parseId,
 } from './routeUtils.js';
+import { registerMedicalAdminRoutes } from './medicalAdminRoutes.js';
 
 const employeeCreateInput = z.object({
   displayName: z.string().trim().min(1).max(160),
@@ -79,6 +80,10 @@ function activeFilter(includeArchived: string) {
 const activeCourseRequirementFilter = {
   course: { archivedAt: null },
 } satisfies Prisma.SiteCourseRequirementWhereInput;
+
+const activeMedicalRequirementFilter = {
+  medical: { archivedAt: null },
+} satisfies Prisma.SiteMedicalRequirementWhereInput;
 
 function dateFields<T extends { completedOn: Date; expiresOn: Date }>(row: T) {
   return {
@@ -208,6 +213,12 @@ export async function registerAdminRoutes(app: FastifyInstance) {
             orderBy: { completedOn: 'desc' },
             take: 1,
           },
+          medicalCompletions: {
+            where: { voidedAt: null, medical: { archivedAt: null } },
+            select: { completedOn: true },
+            orderBy: { completedOn: 'desc' },
+            take: 1,
+          },
         },
         orderBy: { displayName: 'asc' },
         skip: (query.page - 1) * query.pageSize,
@@ -228,12 +239,24 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         latestCompletionOn: item.completions[0]
           ? formatDateOnly(item.completions[0].completedOn)
           : null,
+        latestMedicalCompletionOn: item.medicalCompletions[0]
+          ? formatDateOnly(item.medicalCompletions[0].completedOn)
+          : null,
         completions: undefined,
+        medicalCompletions: undefined,
       })),
       total,
       query.page,
       query.pageSize,
     );
+  });
+
+  app.get('/api/v1/admin/employee-options', admin, async () => {
+    return (await getPrisma()).employee.findMany({
+      where: { archivedAt: null },
+      select: { id: true, displayName: true },
+      orderBy: { displayName: 'asc' },
+    });
   });
 
   app.get('/api/v1/admin/employees/:id', admin, async (request) => {
@@ -243,6 +266,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         include: {
           completions: {
             include: { course: true },
+            orderBy: [{ completedOn: 'desc' }, { recordedAt: 'desc' }],
+          },
+          medicalCompletions: {
+            include: { medical: true },
             orderBy: [{ completedOn: 'desc' }, { recordedAt: 'desc' }],
           },
         },
@@ -260,6 +287,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         accounts !== null,
       ),
       completions: employee.completions.map(dateFields),
+      medicalCompletions: employee.medicalCompletions.map(dateFields),
     };
   });
 
@@ -394,6 +422,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           _count: {
             select: {
               requirements: { where: activeCourseRequirementFilter },
+              medicalRequirements: { where: activeMedicalRequirementFilter },
             },
           },
         },
@@ -425,6 +454,11 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           where: activeCourseRequirementFilter,
           include: { course: true },
           orderBy: { course: { name: 'asc' } },
+        },
+        medicalRequirements: {
+          where: activeMedicalRequirementFilter,
+          include: { medical: true },
+          orderBy: { medical: { name: 'asc' } },
         },
       },
     });
@@ -495,6 +529,19 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return pageResult(items, total, query.page, query.pageSize);
   });
 
+  app.get('/api/v1/admin/course-options', admin, async () => {
+    return (await getPrisma()).course.findMany({
+      where: { archivedAt: null },
+      select: {
+        id: true,
+        name: true,
+        validityMonths: true,
+        requirements: { select: { siteId: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+  });
+
   app.get('/api/v1/admin/courses/:id', admin, async (request) => {
     const course = await (await getPrisma()).course.findUnique({
       where: { id: parseId(request) },
@@ -550,6 +597,11 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const data = courseInput.parse(request.body);
     const prisma = await getPrisma();
     return prisma.$transaction(async (transaction) => {
+      // Catalogue edits replace the complete assignment set. Lock the parent
+      // row so concurrent edits cannot leave a union of both submissions.
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT id FROM course WHERE id = ${id}::uuid FOR UPDATE`,
+      );
       const course = await transaction.course.findUnique({
         where: { id },
         include: { requirements: true },
@@ -722,4 +774,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     );
     return dateFields(completion);
   });
+
+  await registerMedicalAdminRoutes(app);
 }
