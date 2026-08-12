@@ -70,6 +70,13 @@ authorization. Every employee is created with a Cognito account, and
 `cognito_subject` links that account to exactly one employee. Authorization
 uses the verified Cognito `sub`, never a name or email match.
 
+Cognito remains the source of truth for account setup state. Management loads
+the live `employee` group and joins accounts to rows by `cognito_subject`:
+`FORCE_CHANGE_PASSWORD` means invitation pending and `CONFIRMED` means setup
+complete, not proof that the employee has used the application. Account state,
+temporary passwords, and invitation-validity timestamps are not stored in
+PostgreSQL. Invitation resend therefore requires no schema migration.
+
 ### `site`
 
 - `id uuid primary key`
@@ -189,6 +196,8 @@ indexes and checks are maintained in the reviewed migration SQL.
 ## Archive Behavior
 
 - Employee archive preserves all completions.
+- Employee archive also prevents temporary-password invitation resend without
+  deleting or disabling the Cognito account.
 - Site archive preserves all course assignments.
 - Course archive preserves assignments and suspends them from readiness.
 - Archived records are restored or retained; normal application workflows do
@@ -214,5 +223,6 @@ role access only to the application secret.
 - per-requirement warning periods
 - optimistic version columns
 - general audit events
+- employee application-use timestamps and cached Cognito account state
 - manual expiry, bulk completion entry, and spreadsheet imports
 - certificate attachments and approval workflows

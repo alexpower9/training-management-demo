@@ -39,6 +39,21 @@ test('employee mutations are rejected before database access', async () => {
   await app.close();
 });
 
+test('employees cannot resend another employee invitation', async () => {
+  const app = await buildApp();
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/admin/employees/20000000-0000-4000-8000-000000000001/resend-invitation',
+    headers: {
+      'x-demo-user-role': 'employee',
+    },
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.json().code, 'FORBIDDEN');
+  await app.close();
+});
+
 test('unrecognized development roles are rejected', async () => {
   const app = await buildApp();
   const response = await app.inject({

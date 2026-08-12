@@ -36,16 +36,72 @@ const saving = ref(false);
 const fieldErrors = ref({});
 const confirmOpen = ref(false);
 const confirmBusy = ref(false);
+const invitationConfirmOpen = ref(false);
+const invitationBusy = ref(false);
 const form = reactive({
   displayName: '',
   email: '',
 });
 const initialForm = ref('');
 
+const accountStatuses = {
+  invitationPending: {
+    label: 'Invitation pending',
+    description: 'The employee has not completed account setup.',
+    tone: 'warning',
+  },
+  confirmed: {
+    label: 'Account confirmed',
+    description: 'The employee has completed account setup.',
+    tone: 'success',
+  },
+  passwordResetRequired: {
+    label: 'Password reset required',
+    description: 'The employee must reset their password before signing in.',
+    tone: 'warning',
+  },
+  disabled: {
+    label: 'Account disabled',
+    description: 'This account is disabled and cannot sign in.',
+    tone: 'danger',
+  },
+  misconfigured: {
+    label: 'Account mismatch',
+    description: 'The employee email does not match the linked Cognito account.',
+    tone: 'danger',
+  },
+  missing: {
+    label: 'Account missing',
+    description: 'No matching employee account was found.',
+    tone: 'danger',
+  },
+  unknown: {
+    label: 'Status unavailable',
+    description: 'The employee account status could not be determined.',
+    tone: 'neutral',
+  },
+};
+
 const formDirty = computed(() => JSON.stringify(form) !== initialForm.value);
 const drawerTitle = computed(() =>
   formMode.value === 'create' ? 'Add employee' : 'Edit employee',
 );
+
+function accountStatus(employee) {
+  return accountStatuses[employee?.account?.status] || accountStatuses.unknown;
+}
+
+function accountStatusClass(employee) {
+  return `status-badge status-badge--${accountStatus(employee).tone}`;
+}
+
+function canResendInvitation(employee) {
+  return (
+    !employee?.archivedAt &&
+    employee?.account?.status === 'invitationPending' &&
+    employee.account.canResendInvitation === true
+  );
+}
 
 function setForm(values = {}) {
   Object.assign(form, {
@@ -167,6 +223,69 @@ async function toggleArchive() {
   }
 }
 
+function askResendInvitation() {
+  if (!canResendInvitation(selected.value) || invitationBusy.value) return;
+  invitationConfirmOpen.value = true;
+}
+
+async function resendInvitation() {
+  if (!canResendInvitation(selected.value) || invitationBusy.value) return;
+
+  const employeeId = selected.value.id;
+  invitationBusy.value = true;
+  try {
+    const updated = await adminRepository.resendEmployeeInvitation(employeeId);
+    invitationConfirmOpen.value = false;
+    if (selected.value?.id === employeeId) {
+      selected.value = { ...selected.value, ...updated };
+    }
+    items.value = items.value.map((item) =>
+      item.id === employeeId ? { ...item, ...updated } : item,
+    );
+    addToast('Employee invitation resent.');
+  } catch (error) {
+    invitationConfirmOpen.value = false;
+    addToast(error.message, 'danger');
+    const employeeStillSelected = selected.value?.id === employeeId;
+    const employeeAccount = employeeStillSelected
+      ? selected.value.account
+      : items.value.find((item) => item.id === employeeId)?.account;
+    const unavailableForImmediateResend = {
+      ...employeeAccount,
+      canResendInvitation: false,
+    };
+    if (employeeStillSelected) {
+      selected.value = {
+        ...selected.value,
+        account: unavailableForImmediateResend,
+      };
+    }
+    items.value = items.value.map((item) =>
+      item.id === employeeId
+        ? { ...item, account: unavailableForImmediateResend }
+        : item,
+    );
+    if (employeeStillSelected) {
+      await selectEmployee(employeeId);
+      if (selected.value?.id === employeeId) {
+        items.value = items.value.map((item) =>
+          item.id === employeeId
+            ? {
+                ...item,
+                displayName: selected.value.displayName,
+                email: selected.value.email,
+                archivedAt: selected.value.archivedAt,
+                account: selected.value.account,
+              }
+            : item,
+        );
+      }
+    }
+  } finally {
+    invitationBusy.value = false;
+  }
+}
+
 function applySearch() {
   page.value = 1;
   syncQuery();
@@ -221,7 +340,8 @@ watch(includeArchived, applySearch);
                 <th>Employee</th>
                 <th>Email</th>
                 <th>Latest completion</th>
-                <th>Status</th>
+                <th>Account</th>
+                <th>Record status</th>
               </tr>
             </thead>
             <tbody>
@@ -238,6 +358,11 @@ watch(includeArchived, applySearch);
                 </td>
                 <td>{{ employee.email }}</td>
                 <td>{{ employee.latestCompletionOn ? formatDate(employee.latestCompletionOn) : 'None' }}</td>
+                <td>
+                  <span :class="accountStatusClass(employee)">
+                    {{ accountStatus(employee).label }}
+                  </span>
+                </td>
                 <td><ArchiveBadge :archived="Boolean(employee.archivedAt)" /></td>
               </tr>
             </tbody>
@@ -270,7 +395,22 @@ watch(includeArchived, applySearch);
             <div>
               <h3 class="detail-heading">Account</h3>
               <strong>{{ selected.email }}</strong>
+              <p>
+                <span :class="accountStatusClass(selected)">
+                  {{ accountStatus(selected).label }}
+                </span>
+              </p>
+              <small>{{ accountStatus(selected).description }}</small>
             </div>
+            <button
+              v-if="canResendInvitation(selected)"
+              class="secondary-action"
+              type="button"
+              :disabled="invitationBusy"
+              @click="askResendInvitation"
+            >
+              {{ invitationBusy ? 'Resending...' : 'Resend invitation' }}
+            </button>
           </section>
           <RouterLink
             :to="{ name: 'manage-completions', query: { action: 'create', employeeId: selected.id } }"
@@ -358,6 +498,16 @@ watch(includeArchived, applySearch);
     :busy="confirmBusy"
     @cancel="confirmOpen = false"
     @confirm="toggleArchive"
+  />
+
+  <ConfirmDialog
+    :open="invitationConfirmOpen"
+    title="Resend employee invitation?"
+    :message="`A new temporary password will be emailed to ${selected?.email || 'this employee'}. The previous temporary password will no longer work.`"
+    confirm-label="Resend invitation"
+    :busy="invitationBusy"
+    @cancel="invitationConfirmOpen = false"
+    @confirm="resendInvitation"
   />
 
 </template>

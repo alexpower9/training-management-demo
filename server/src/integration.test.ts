@@ -72,6 +72,13 @@ test(
         linkedListResponse.json().items[0].email,
         'overdue.employee@example.com',
       );
+      assert.deepEqual(linkedListResponse.json().items[0].account, {
+        status: 'invitationPending',
+        canResendInvitation: true,
+      });
+      assert.equal('subject' in linkedListResponse.json().items[0].account, false);
+      assert.equal('username' in linkedListResponse.json().items[0].account, false);
+      assert.equal('email' in linkedListResponse.json().items[0].account, false);
       const emailSearchResponse = await request(
         'GET',
         '/api/v1/admin/employees?search=overdue.employee%40example.com',
@@ -98,6 +105,21 @@ test(
       });
       assert.equal(adminDetailResponse.statusCode, 200);
       assert.equal('cognitoSubject' in adminDetailResponse.json(), false);
+      assert.deepEqual(adminDetailResponse.json().account, {
+        status: 'invitationPending',
+        canResendInvitation: true,
+      });
+
+      const resendInvitationResponse = await request(
+        'POST',
+        `/api/v1/admin/employees/${employee.id}/resend-invitation`,
+      );
+      assert.equal(resendInvitationResponse.statusCode, 200);
+      assert.equal('cognitoSubject' in resendInvitationResponse.json(), false);
+      assert.deepEqual(resendInvitationResponse.json().account, {
+        status: 'invitationPending',
+        canResendInvitation: false,
+      });
 
       const removedLinkResponse = await request(
         'PUT',
@@ -142,6 +164,15 @@ test(
         `/api/v1/admin/employees/${accountEmployee.id}/archive`,
       );
       assert.equal('cognitoSubject' in archiveEmployeeResponse.json(), false);
+      const archivedResendResponse = await request(
+        'POST',
+        `/api/v1/admin/employees/${accountEmployee.id}/resend-invitation`,
+      );
+      assert.equal(archivedResendResponse.statusCode, 409);
+      assert.equal(
+        archivedResendResponse.json().code,
+        'EMPLOYEE_INVITATION_ARCHIVED',
+      );
 
       const siteResponse = await request('POST', '/api/v1/admin/sites', {
         name: 'Constraint Site',

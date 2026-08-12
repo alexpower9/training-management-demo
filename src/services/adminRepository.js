@@ -20,6 +20,8 @@ export const adminRepository = {
     apiRequest(`/admin/employees/${id}/${archived ? 'archive' : 'restore'}`, {
       method: 'POST',
     }),
+  resendEmployeeInvitation: (id) =>
+    apiRequest(`/admin/employees/${id}/resend-invitation`, { method: 'POST' }),
 
   listSites: (options) => apiRequest('/admin/sites', { query: listQuery(options) }),
   listSiteOptions: () => apiRequest('/admin/site-options'),
