@@ -27,9 +27,11 @@ shared seed.
 10. An empty Training or Medical domain is neutral. A site with no assigned
     requirements in either domain shows every employee as `noRequirements`
     and ineligible.
-11. Certificates, medical providers, results, restrictions, attachments,
-    manual expiry, approval workflows, waivers, equivalents, grace periods,
-    and temporary access are outside v1.
+11. Administrators and owners may track one open pending completion date per
+    employee and course or medical. Pending records do not affect readiness.
+12. Certificates, medical providers, results, restrictions, attachments,
+    manually overriding expiry during ordinary entry, approval workflows,
+    waivers, equivalents, grace periods, and temporary access are outside v1.
 
 The canonical Training demo dataset contains eight employees, four sites,
 twelve courses, twelve site-course assignments, and 83 course completion
@@ -45,13 +47,19 @@ erDiagram
     COURSE ||--o{ SITE_COURSE_REQUIREMENT : assigned_to
     EMPLOYEE ||--o{ COURSE_COMPLETION : completes
     COURSE ||--o{ COURSE_COMPLETION : records
+    EMPLOYEE ||--o{ COURSE_PENDING_COMPLETION : awaits_date
+    COURSE ||--o{ COURSE_PENDING_COMPLETION : tracks
+    COURSE_PENDING_COMPLETION o|--o| COURSE_COMPLETION : finalizes_to
     SITE ||--o{ SITE_MEDICAL_REQUIREMENT : requires
     MEDICAL ||--o{ SITE_MEDICAL_REQUIREMENT : assigned_to
     EMPLOYEE ||--o{ MEDICAL_COMPLETION : completes
     MEDICAL ||--o{ MEDICAL_COMPLETION : records
+    EMPLOYEE ||--o{ MEDICAL_PENDING_COMPLETION : awaits_date
+    MEDICAL ||--o{ MEDICAL_PENDING_COMPLETION : tracks
+    MEDICAL_PENDING_COMPLETION o|--o| MEDICAL_COMPLETION : finalizes_to
 ```
 
-The production model contains eight tables:
+The production model contains ten tables:
 
 1. `employee`
 2. `site`
@@ -61,9 +69,11 @@ The production model contains eight tables:
 6. `medical`
 7. `site_medical_requirement`
 8. `medical_completion`
+9. `course_pending_completion`
+10. `medical_pending_completion`
 
-The three Medical tables mirror the Course catalogue, site assignment, and
-immutable completion rules. They share foreign keys to `employee` and `site`,
+The Medical tables mirror the Course catalogue, site assignment, immutable
+completion, and pending-date rules. They share foreign keys to `employee` and `site`,
 but Course and Medical records never satisfy one another. Medical names are
 permanently unique within the Medical namespace; a Course and Medical may have
 the same name.
@@ -154,6 +164,8 @@ row immediately changes the selected site's readiness requirements.
 - `comment varchar(500) null`
 - `recorded_by_subject varchar(255) not null`
 - `recorded_at timestamptz not null`
+- `corrects_completion_id uuid null unique references course_completion`
+- `expiry_manually_set boolean not null default false`
 - `voided_at timestamptz null`
 - `voided_by_subject varchar(255) null`
 - `void_reason varchar(500) null`
@@ -170,6 +182,13 @@ Rules:
 Completion rows are immutable. Renewals create new rows; corrections void the
 incorrect row with a required reason. Optional comments are saved at record
 creation and are not edited later.
+
+An administrator date correction creates a new active row linked through
+`corrects_completion_id` after atomically voiding its source. The replacement
+keeps the same employee, item, validity snapshot, comment, and correcting
+actor, while allowing both date fields to change. `expiry_manually_set`
+distinguishes its administrator-confirmed expiration from an ordinary
+catalogue-validity calculation. A source can have only one direct replacement.
 
 Expiry uses calendar-month arithmetic with month-end clamping.
 January 31 plus one month becomes February 28 or 29. The API permanently stores
@@ -218,6 +237,8 @@ does not share rows or identifiers with `site_course_requirement`.
 - `comment varchar(500) null`
 - `recorded_by_subject varchar(255) not null`
 - `recorded_at timestamptz not null`
+- `corrects_completion_id uuid null unique references medical_completion`
+- `expiry_manually_set boolean not null default false`
 - `voided_at timestamptz null`
 - `voided_by_subject varchar(255) null`
 - `void_reason varchar(500) null`
@@ -228,6 +249,43 @@ course completions. A partial unique index rejects an identical non-voided
 employee, medical, and completion-date occurrence. Foreign keys to `employee`
 and `medical` are restrictive, and a medical completion can never satisfy a
 course requirement.
+
+Medical date corrections follow the same linked-replacement and immutable
+source rules as Course corrections.
+
+### Pending completion tables
+
+`course_pending_completion` and `medical_pending_completion` are separate
+administrator workflow tables. Each stores an employee, the matching domain
+item, a validity snapshot, optional comment, creator, and creation time. A
+partial unique index permits only one unresolved pending record for the same
+employee and item, while allowing an older dated completion to remain current.
+
+Both tables contain:
+
+- `id uuid primary key`
+- `employee_id uuid not null references employee`
+- `course_id uuid not null references course` or
+  `medical_id uuid not null references medical`
+- `validity_months_snapshot smallint not null`
+- `comment varchar(500) null`
+- `created_by_subject varchar(255) not null`
+- `created_at timestamptz not null`
+- `resolution pending_completion_resolution null`
+- `resolved_at timestamptz null`
+- `resolved_by_subject varchar(255) null`
+- `cancellation_reason varchar(500) null`
+- a nullable, unique `completion_id` foreign key to the matching completion
+  table
+
+An unresolved record has no resolution metadata. Finalization transactionally
+creates an ordinary immutable completion using the saved validity and comment,
+then links the pending record to it. The trigger verifies that the linked,
+non-voided completion has the same employee, item, validity, comment, and actor.
+Cancellation records the actor, time, and required reason. Database checks and
+triggers permit only one unresolved-to-resolved transition and prevent
+rewriting or reopening either outcome. Pending records are excluded from
+readiness and employee self-service.
 
 ## Readiness
 
@@ -289,6 +347,10 @@ The migration uses:
   completion tables
 - separate partial duplicate-completion indexes for non-voided Course and
   Medical rows
+- unique correction-source indexes and insert/update triggers that require an
+  exact, actor-matched replacement of a voided immutable source row
+- separate partial indexes allowing one open pending record per employee and
+  item, plus one-way pending-resolution checks and triggers
 
 Prisma models map to snake_case table and column names. Unsupported partial
 indexes and checks are maintained in the reviewed migration SQL.
@@ -296,6 +358,8 @@ indexes and checks are maintained in the reviewed migration SQL.
 ## Archive Behavior
 
 - Employee archive preserves all Course and Medical completions.
+- Employee, Course, and Medical archive preserves pending-date history;
+  pending records created while active may still be finalized afterward.
 - Employee archive also prevents temporary-password invitation resend without
   deleting or disabling the Cognito account.
 - Site archive preserves all Course and Medical assignments.
@@ -320,7 +384,7 @@ schema, migration-history, and application-object owner, and leave the runtime
 role as a non-privileged login with database connection, schema usage, and the
 documented per-table/per-column DML allowlist. The runtime role cannot create
 database objects, use temporary tables, update assignment rows, change
-immutable completion facts, delete completion history, or use sequences.
+immutable completion or pending facts, delete either history, or use sequences.
 Store credentials in separate Secrets Manager secrets. Prefer a
 protected CI/CodeBuild migration role as the strong boundary and give the API
 instance role access only to the runtime secret; the same-host migration unit

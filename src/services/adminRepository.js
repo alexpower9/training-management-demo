@@ -60,6 +60,7 @@ export const adminRepository = {
 
   listCompletions: (options) =>
     apiRequest('/admin/completions', { query: listQuery(options) }),
+  getCompletion: (id) => apiRequest(`/admin/completions/${id}`),
   createCompletion: (body) =>
     apiRequest('/admin/completions', { method: 'POST', body }),
   voidCompletion: (id, reason) =>
@@ -67,13 +68,64 @@ export const adminRepository = {
       method: 'POST',
       body: { reason },
     }),
+  correctCompletionDates: (id, body) =>
+    apiRequest(`/admin/completions/${id}/correct-dates`, {
+      method: 'POST',
+      body,
+    }),
 
   listMedicalCompletions: (options) =>
     apiRequest('/admin/medical-completions', { query: listQuery(options) }),
+  getMedicalCompletion: (id) =>
+    apiRequest(`/admin/medical-completions/${id}`),
   createMedicalCompletion: (body) =>
     apiRequest('/admin/medical-completions', { method: 'POST', body }),
   voidMedicalCompletion: (id, reason) =>
     apiRequest(`/admin/medical-completions/${id}/void`, {
+      method: 'POST',
+      body: { reason },
+    }),
+  correctMedicalCompletionDates: (id, body) =>
+    apiRequest(`/admin/medical-completions/${id}/correct-dates`, {
+      method: 'POST',
+      body,
+    }),
+
+  listPendingCompletions: (options) =>
+    apiRequest('/admin/pending-completions', { query: listQuery(options) }),
+  getPendingCompletion: (id) =>
+    apiRequest(`/admin/pending-completions/${id}`),
+  createPendingCompletion: (body) =>
+    apiRequest('/admin/pending-completions', { method: 'POST', body }),
+  finalizePendingCompletion: (id, completedOn) =>
+    apiRequest(`/admin/pending-completions/${id}/finalize`, {
+      method: 'POST',
+      body: { completedOn },
+    }),
+  cancelPendingCompletion: (id, reason) =>
+    apiRequest(`/admin/pending-completions/${id}/cancel`, {
+      method: 'POST',
+      body: { reason },
+    }),
+
+  listMedicalPendingCompletions: (options) =>
+    apiRequest('/admin/medical-pending-completions', {
+      query: listQuery(options),
+    }),
+  getMedicalPendingCompletion: (id) =>
+    apiRequest(`/admin/medical-pending-completions/${id}`),
+  createMedicalPendingCompletion: (body) =>
+    apiRequest('/admin/medical-pending-completions', {
+      method: 'POST',
+      body,
+    }),
+  finalizeMedicalPendingCompletion: (id, completedOn) =>
+    apiRequest(`/admin/medical-pending-completions/${id}/finalize`, {
+      method: 'POST',
+      body: { completedOn },
+    }),
+  cancelMedicalPendingCompletion: (id, reason) =>
+    apiRequest(`/admin/medical-pending-completions/${id}/cancel`, {
       method: 'POST',
       body: { reason },
     }),

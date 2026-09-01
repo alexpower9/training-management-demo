@@ -7,6 +7,7 @@ import ConfirmDialog from '@/components/manage/ConfirmDialog.vue';
 import DetailPanel from '@/components/manage/DetailPanel.vue';
 import FormDrawer from '@/components/manage/FormDrawer.vue';
 import PaginationControls from '@/components/manage/PaginationControls.vue';
+import PendingDateBadge from '@/components/manage/PendingDateBadge.vue';
 import ResourceTable from '@/components/manage/ResourceTable.vue';
 import SearchToolbar from '@/components/manage/SearchToolbar.vue';
 import StatusBadge from '@/components/StatusBadge.vue';
@@ -303,6 +304,10 @@ function completionExpiryText(completion) {
   return `${prefix} ${formatDate(completion.expiresOn)}`;
 }
 
+function auditDate(value) {
+  return formatDate(value?.slice(0, 10));
+}
+
 onMounted(async () => {
   await loadList();
   if (route.query.action === 'create') openCreate();
@@ -417,17 +422,87 @@ watch(includeArchived, applySearch);
           </section>
           <div class="inline-actions">
             <RouterLink
-              :to="{ name: 'manage-completions', query: { type: 'training', action: 'create', employeeId: selected.id } }"
+              :to="{ name: 'manage-completions', query: { type: 'training', view: 'history', action: 'create', employeeId: selected.id } }"
               class="primary-action"
             >
               Record training
             </RouterLink>
             <RouterLink
-              :to="{ name: 'manage-completions', query: { type: 'medical', action: 'create', employeeId: selected.id } }"
+              :to="{ name: 'manage-completions', query: { type: 'medical', view: 'history', action: 'create', employeeId: selected.id } }"
               class="primary-action"
             >
               Record medical
             </RouterLink>
+          </div>
+          <div>
+            <h3 class="detail-heading">Training pending dates</h3>
+            <div v-if="selected.pendingCompletions?.length" class="stack-list">
+              <article
+                v-for="pending in selected.pendingCompletions"
+                :key="pending.id"
+                class="requirement-row"
+              >
+                <div>
+                  <strong>{{ pending.course.name }}</strong>
+                  <span>Created {{ auditDate(pending.createdAt) }}</span>
+                </div>
+                <div class="requirement-status">
+                  <PendingDateBadge />
+                  <RouterLink
+                    :to="{
+                      name: 'manage-completions',
+                      query: {
+                        type: 'training',
+                        view: 'pending',
+                        id: pending.id,
+                        action: 'finalize',
+                      },
+                    }"
+                    class="secondary-action secondary-action--compact"
+                  >
+                    Add date
+                  </RouterLink>
+                </div>
+              </article>
+            </div>
+            <div v-else class="empty-state empty-state--compact">
+              <strong>No pending training dates</strong>
+            </div>
+          </div>
+          <div>
+            <h3 class="detail-heading">Medical pending dates</h3>
+            <div v-if="selected.pendingMedicalCompletions?.length" class="stack-list">
+              <article
+                v-for="pending in selected.pendingMedicalCompletions"
+                :key="pending.id"
+                class="requirement-row"
+              >
+                <div>
+                  <strong>{{ pending.medical.name }}</strong>
+                  <span>Created {{ auditDate(pending.createdAt) }}</span>
+                </div>
+                <div class="requirement-status">
+                  <PendingDateBadge />
+                  <RouterLink
+                    :to="{
+                      name: 'manage-completions',
+                      query: {
+                        type: 'medical',
+                        view: 'pending',
+                        id: pending.id,
+                        action: 'finalize',
+                      },
+                    }"
+                    class="secondary-action secondary-action--compact"
+                  >
+                    Add date
+                  </RouterLink>
+                </div>
+              </article>
+            </div>
+            <div v-else class="empty-state empty-state--compact">
+              <strong>No pending medical dates</strong>
+            </div>
           </div>
           <div>
             <h3 class="detail-heading">Training completion history</h3>

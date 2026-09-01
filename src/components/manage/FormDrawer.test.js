@@ -25,4 +25,27 @@ describe('FormDrawer', () => {
     await wrapper.get('form').trigger('submit');
     expect(wrapper.emitted('save')).toHaveLength(1);
   });
+
+  it('cannot be closed from its header or backdrop while saving', async () => {
+    const wrapper = mount(FormDrawer, {
+      props: {
+        open: true,
+        title: 'Edit completion dates',
+        dirty: true,
+        saving: true,
+      },
+      global: { stubs: { Teleport: true } },
+    });
+
+    const headerClose = wrapper.get('button[aria-label="Close"]');
+    const backdropClose = wrapper.get('button[aria-label="Close form"]');
+    expect(headerClose.attributes('disabled')).toBeDefined();
+    expect(backdropClose.attributes('disabled')).toBeDefined();
+
+    await headerClose.trigger('click');
+    await backdropClose.trigger('click');
+
+    expect(window.confirm).not.toHaveBeenCalled();
+    expect(wrapper.emitted('close')).toBeUndefined();
+  });
 });

@@ -162,15 +162,201 @@ test.describe.serial('training management smoke tests', () => {
     await expect(page.getByText('Completion recorded.')).toBeVisible();
     await expect(page.getByText('Certificate verified during smoke test')).toBeVisible();
 
+    const originalResponse = await request.get('/api/v1/admin/completions', {
+      headers: adminHeaders,
+      params: { employeeId: employee.id, courseId: course.id },
+    });
+    expect(originalResponse.ok()).toBeTruthy();
+    const original = (await originalResponse.json()).items[0];
+
     await page.locator('tbody').getByText(employee.displayName, { exact: true }).click();
     await page.getByRole('button', { name: 'Renew' }).click();
     await expect(page.locator('.form-drawer select').first()).toHaveValue(employee.id);
     await page.getByRole('button', { name: 'Cancel' }).click();
 
-    await page.getByRole('button', { name: 'Void' }).click();
+    await page.getByRole('button', { name: 'Edit dates' }).click();
+    const correctionDrawer = page.getByRole('dialog', {
+      name: 'Edit course completion dates',
+    });
+    await expect(correctionDrawer.getByLabel('Completed on')).toHaveValue('2026-01-31');
+    await expect(correctionDrawer.getByLabel('Expires on')).toHaveValue('2026-02-28');
+    await correctionDrawer.getByLabel('Completed on').fill('2026-02-01');
+    await correctionDrawer.getByLabel('Expires on').fill('2026-03-15');
+    await correctionDrawer
+      .getByLabel('Correction reason')
+      .fill('Corrected against the signed course certificate.');
+    await correctionDrawer.getByRole('button', { name: 'Save' }).click();
+    await expect(
+      page.getByText('Completion dates corrected. The original remains in voided history.'),
+    ).toBeVisible();
+    await expect(page.getByText('Feb 1, 2026', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Mar 15, 2026', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Corrected dates · expiry manually set')).toBeVisible();
+
+    const correctedResponse = await request.get('/api/v1/admin/completions', {
+      headers: adminHeaders,
+      params: {
+        employeeId: employee.id,
+        courseId: course.id,
+        includeVoided: 'true',
+      },
+    });
+    expect(correctedResponse.ok()).toBeTruthy();
+    const correctedItems = (await correctedResponse.json()).items;
+    const corrected = correctedItems.find((completion) => !completion.voidedAt);
+    const voidedOriginal = correctedItems.find((completion) => completion.id === original.id);
+    expect(corrected.correctsCompletionId).toBe(original.id);
+    expect(corrected.expiryManuallySet).toBe(true);
+    expect(corrected.completedOn).toBe('2026-02-01');
+    expect(corrected.expiresOn).toBe('2026-03-15');
+    expect(voidedOriginal.voidReason).toBe(
+      'Corrected against the signed course certificate.',
+    );
+
+    await page.getByRole('button', { name: 'Void', exact: true }).click();
     await page.getByLabel('Reason').fill('Incorrect date entered during smoke test');
     await page.getByRole('button', { name: 'Void completion' }).click();
     await expect(page.getByText('Completion voided.')).toBeVisible();
+  });
+
+  test('pending training date can be finalized after its employee and course are archived', async ({
+    page,
+    request,
+  }) => {
+    const employee = await create(request, '/employees', {
+      displayName: unique('Pending Training Employee'),
+      email: `${unique('pending-training-employee')}@example.com`,
+    });
+    const course = await create(request, '/courses', {
+      name: unique('Pending Training Course'),
+      validityMonths: 1,
+      siteIds: [],
+    });
+
+    await page.goto(
+      `/manage/completions?view=history&action=create&employeeId=${employee.id}`,
+    );
+    const entryDrawer = page.getByRole('dialog', {
+      name: 'Record course completion',
+    });
+    await entryDrawer.locator('select').nth(1).selectOption(course.id);
+    await expect(entryDrawer.getByLabel('Completed on (optional)')).toHaveValue('');
+    await entryDrawer
+      .getByLabel('Comment')
+      .fill('Technician will confirm the certificate date.');
+    await entryDrawer.getByRole('button', { name: 'Save' }).click();
+
+    await expect(
+      page.getByText(
+        'Pending date saved. It will not affect readiness until finalized.',
+      ),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/view=pending/);
+    await expect(page.getByText('Pending date', { exact: true }).first()).toBeVisible();
+
+    const archiveEmployee = await request.post(
+      `/api/v1/admin/employees/${employee.id}/archive`,
+      { headers: adminHeaders },
+    );
+    expect(archiveEmployee.ok()).toBeTruthy();
+    const archiveCourse = await request.post(
+      `/api/v1/admin/courses/${course.id}/archive`,
+      { headers: adminHeaders },
+    );
+    expect(archiveCourse.ok()).toBeTruthy();
+
+    await page.getByRole('button', { name: 'Add completion date' }).click();
+    const finalizeDrawer = page.getByRole('dialog', {
+      name: 'Add completion date',
+    });
+    await finalizeDrawer.getByLabel('Completed on').fill('2026-01-31');
+    await expect(finalizeDrawer.getByText('Expires Feb 28, 2026')).toBeVisible();
+    await finalizeDrawer.getByRole('button', { name: 'Save' }).click();
+
+    await expect(
+      page.getByText('Completion date added. The completion now counts toward readiness.'),
+    ).toBeVisible();
+    await expect(page.getByText('Finalized', { exact: true }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'View completion' }).click();
+    await expect(page).toHaveURL(/view=history/);
+    await expect(page.getByText('Jan 31, 2026', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Feb 28, 2026', { exact: true }).first()).toBeVisible();
+  });
+
+  test('medical renewal can remain pending beside current history and retain cancellation', async ({
+    page,
+    request,
+  }) => {
+    const employee = await create(request, '/employees', {
+      displayName: unique('Pending Medical Employee'),
+      email: `${unique('pending-medical-employee')}@example.com`,
+    });
+    const medical = await create(request, '/medicals', {
+      name: unique('Pending Medical'),
+      validityMonths: 12,
+      siteIds: [],
+    });
+    const current = await create(request, '/medical-completions', {
+      employeeId: employee.id,
+      medicalId: medical.id,
+      completedOn: '2026-06-01',
+    });
+
+    await page.goto(
+      `/manage/completions?type=medical&view=history&id=${current.id}`,
+    );
+    await page.getByRole('button', { name: 'Renew' }).click();
+    const renewalDrawer = page.getByRole('dialog', {
+      name: 'Record medical completion',
+    });
+    await expect(renewalDrawer.locator('select').first()).toHaveValue(employee.id);
+    await expect(renewalDrawer.locator('select').nth(1)).toHaveValue(medical.id);
+    await expect(renewalDrawer.getByLabel('Completed on (optional)')).toHaveValue('');
+    await renewalDrawer.getByRole('button', { name: 'Save' }).click();
+
+    await expect(
+      page.getByText(
+        'Pending date saved. It will not affect readiness until finalized.',
+      ),
+    ).toBeVisible();
+    const pendingResponse = await request.get(
+      '/api/v1/admin/medical-pending-completions',
+      {
+        headers: adminHeaders,
+        params: { employeeId: employee.id, medicalId: medical.id },
+      },
+    );
+    expect(pendingResponse.ok()).toBeTruthy();
+    const pending = (await pendingResponse.json()).items[0];
+    expect(pending.status).toBe('pending');
+
+    const currentResponse = await request.get(
+      `/api/v1/admin/medical-completions/${current.id}`,
+      { headers: adminHeaders },
+    );
+    expect(currentResponse.ok()).toBeTruthy();
+    expect((await currentResponse.json()).voidedAt).toBeNull();
+
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    const cancelDialog = page.getByRole('dialog', {
+      name: 'Cancel pending date?',
+    });
+    await cancelDialog
+      .getByLabel('Reason')
+      .fill('The renewal request was entered for the wrong technician.');
+    await cancelDialog.getByRole('button', { name: 'Cancel pending date' }).click();
+    await expect(page.getByText('Pending date cancelled.')).toBeVisible();
+
+    await page.goto(
+      `/manage/completions?type=medical&view=pending&resolved=true&id=${pending.id}`,
+    );
+    await expect(page.getByText('Cancelled', { exact: true }).first()).toBeVisible();
+    await expect(
+      page.getByText('The renewal request was entered for the wrong technician.'),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Add completion date' }),
+    ).toHaveCount(0);
   });
 
   test('medical requirement controls combined site access and supports completion voiding', async ({
@@ -256,13 +442,41 @@ test.describe.serial('training management smoke tests', () => {
     expect(summary.combinedAccess.eligible).toBe(true);
 
     await page.locator('tbody').getByText(employee.displayName, { exact: true }).click();
+    await page.getByRole('button', { name: 'Edit dates' }).click();
+    const correctionDrawer = page.getByRole('dialog', {
+      name: 'Edit medical completion dates',
+    });
+    await expect(correctionDrawer.getByLabel('Completed on')).toHaveValue('2026-06-01');
+    await correctionDrawer.getByLabel('Expires on').fill('2026-06-03');
+    await correctionDrawer
+      .getByLabel('Correction reason')
+      .fill('Medical certificate expiry was entered incorrectly.');
+    await correctionDrawer.getByRole('button', { name: 'Save' }).click();
+    await expect(
+      page.getByText('Completion dates corrected. The original remains in voided history.'),
+    ).toBeVisible();
+    await expect(page.getByText('Corrected dates · expiry manually set')).toBeVisible();
+
+    readinessResponse = await request.get(
+      `/api/v1/sites/${site.id}/readiness?asOf=2026-06-05`,
+      { headers: adminHeaders },
+    );
+    summary = (await readinessResponse.json()).find(
+      (row) => row.employee.id === employee.id,
+    );
+    expect(summary.status).toBe('compliant');
+    expect(summary.domainEligible).toBe(true);
+    expect(summary.eligible).toBe(false);
+    expect(summary.combinedAccess.eligible).toBe(false);
+    expect(summary.combinedAccess.blockingDomains).toEqual(['medical']);
+
     await page.getByRole('button', { name: 'Renew' }).click();
     await expect(page.locator('.form-drawer select').first()).toHaveValue(employee.id);
     await expect(page.locator('.form-drawer select').nth(1)).toHaveValue(medical.id);
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await page.locator('tbody').getByText(employee.displayName, { exact: true }).click();
-    await page.getByRole('button', { name: 'Void' }).click();
+    await page.getByRole('button', { name: 'Void', exact: true }).click();
     await page.getByLabel('Reason').fill('Incorrect medical completion');
     await page.getByRole('button', { name: 'Void completion' }).click();
     await expect(page.getByText('Completion voided.')).toBeVisible();

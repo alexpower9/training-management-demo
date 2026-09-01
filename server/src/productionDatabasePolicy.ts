@@ -9,15 +9,27 @@ export const completionTables = [
   'course_completion',
   'medical_completion',
 ] as const;
+export const pendingCompletionTables = [
+  'course_pending_completion',
+  'medical_pending_completion',
+] as const;
 export const businessTables = [
   ...catalogueTables,
   ...assignmentTables,
   ...completionTables,
+  ...pendingCompletionTables,
 ] as const;
 export const voidColumns = [
   'voided_at',
   'voided_by_subject',
   'void_reason',
+] as const;
+export const pendingResolutionColumns = [
+  'resolution',
+  'resolved_at',
+  'resolved_by_subject',
+  'cancellation_reason',
+  'completion_id',
 ] as const;
 
 export const runtimeTablePolicy = Object.freeze({
@@ -43,10 +55,19 @@ export const runtimeTablePolicy = Object.freeze({
     delete: false,
     updateColumns: voidColumns,
   }),
+  pendingCompletion: Object.freeze({
+    tables: pendingCompletionTables,
+    select: true,
+    insert: true,
+    update: false,
+    delete: false,
+    updateColumns: pendingResolutionColumns,
+  }),
 });
 
 const assignmentTableSet = new Set<string>(assignmentTables);
 const completionTableSet = new Set<string>(completionTables);
+const pendingCompletionTableSet = new Set<string>(pendingCompletionTables);
 
 export function quoteIdentifier(value: string) {
   if (typeof value !== 'string' || value.length === 0 || value.includes('\0')) {
@@ -92,6 +113,10 @@ export async function applyRuntimePrivileges(
     names.map((name) => `public.${quoteIdentifier(name)}`).join(', ');
   const completionList = tables(completionTables);
   const voidColumnList = voidColumns.map(quoteIdentifier).join(', ');
+  const pendingCompletionList = tables(pendingCompletionTables);
+  const pendingResolutionColumnList = pendingResolutionColumns
+    .map(quoteIdentifier)
+    .join(', ');
 
   await ownerClient.$transaction([
     ownerClient.$executeRawUnsafe(
@@ -139,6 +164,13 @@ export async function applyRuntimePrivileges(
     ),
     ownerClient.$executeRawUnsafe(
       `GRANT UPDATE (${voidColumnList}) ON TABLE ${completionList} TO ${runtimeRole}`,
+    ),
+    ownerClient.$executeRawUnsafe(
+      `GRANT SELECT, INSERT ON TABLE ${pendingCompletionList} TO ${runtimeRole}`,
+    ),
+    ownerClient.$executeRawUnsafe(
+      `GRANT UPDATE (${pendingResolutionColumnList}) ON TABLE ` +
+        `${pendingCompletionList} TO ${runtimeRole}`,
     ),
     ownerClient.$executeRawUnsafe(
       `ALTER DEFAULT PRIVILEGES FOR ROLE ${ownerRole} IN SCHEMA public ` +
@@ -384,7 +416,10 @@ export async function verifyRuntimePrivileges(
   }
   for (const privileges of tablePrivileges) {
     const tableName = String(privileges.tableName);
-    const expectedUpdate = !assignmentTableSet.has(tableName) && !completionTableSet.has(tableName);
+    const expectedUpdate =
+      !assignmentTableSet.has(tableName) &&
+      !completionTableSet.has(tableName) &&
+      !pendingCompletionTableSet.has(tableName);
     const expectedDelete = assignmentTableSet.has(tableName);
     if (
       privileges.canSelect !== true ||
@@ -415,7 +450,9 @@ export async function verifyRuntimePrivileges(
     for (const column of columns) {
       const expectedUpdate = catalogueTables.includes(tableName as never) ||
         (completionTables.includes(tableName as never) &&
-          voidColumns.includes(String(column.columnName) as never));
+          voidColumns.includes(String(column.columnName) as never)) ||
+        (pendingCompletionTables.includes(tableName as never) &&
+          pendingResolutionColumns.includes(String(column.columnName) as never));
       if (
         column.canSelect !== true ||
         column.canInsert !== true ||

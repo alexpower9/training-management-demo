@@ -5,14 +5,16 @@ import {
   businessTables,
   catalogueTables,
   completionTables,
+  pendingCompletionTables,
+  pendingResolutionColumns,
   quoteIdentifier,
   runtimeTablePolicy,
   voidColumns,
 } from './productionDatabasePolicy.js';
 
-test('production database policy covers exactly eight independent business tables', () => {
-  assert.equal(businessTables.length, 8);
-  assert.equal(new Set(businessTables).size, 8);
+test('production database policy covers exactly ten independent business tables', () => {
+  assert.equal(businessTables.length, 10);
+  assert.equal(new Set(businessTables).size, 10);
   assert.deepEqual([...catalogueTables].sort(), [
     'course',
     'employee',
@@ -27,9 +29,13 @@ test('production database policy covers exactly eight independent business table
     'course_completion',
     'medical_completion',
   ]);
+  assert.deepEqual([...pendingCompletionTables].sort(), [
+    'course_pending_completion',
+    'medical_pending_completion',
+  ]);
 });
 
-test('runtime policy restricts assignment deletion and completion updates', () => {
+test('runtime policy restricts assignment deletion and history updates', () => {
   assert.deepEqual(runtimeTablePolicy.assignment, {
     tables: assignmentTables,
     select: true,
@@ -45,6 +51,19 @@ test('runtime policy restricts assignment deletion and completion updates', () =
     'voided_at',
     'voided_by_subject',
     'void_reason',
+  ]);
+  assert.equal(runtimeTablePolicy.pendingCompletion.delete, false);
+  assert.equal(runtimeTablePolicy.pendingCompletion.update, false);
+  assert.deepEqual(
+    runtimeTablePolicy.pendingCompletion.updateColumns,
+    pendingResolutionColumns,
+  );
+  assert.deepEqual([...pendingResolutionColumns], [
+    'resolution',
+    'resolved_at',
+    'resolved_by_subject',
+    'cancellation_reason',
+    'completion_id',
   ]);
 });
 

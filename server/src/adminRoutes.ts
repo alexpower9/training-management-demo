@@ -8,6 +8,10 @@ import {
   resendEmployeeInvitation,
   type EmployeeAccount,
 } from './cognitoAdministration.js';
+import {
+  completionDateCorrectionInput,
+  ensureCompletionDatesChanged,
+} from './completionCorrection.js';
 import { config } from './config.js';
 import { getPrisma } from './database.js';
 import {
@@ -18,6 +22,12 @@ import {
 } from './dates.js';
 import { AppError } from './errors.js';
 import { publicEmployeeRecord } from './employeeSerialization.js';
+import {
+  coursePendingCompletionInclude,
+  medicalPendingCompletionInclude,
+  publicPendingCompletion,
+  registerPendingCompletionRoutes,
+} from './pendingCompletionRoutes.js';
 import {
   dateOnlyString,
   ensureFound,
@@ -99,6 +109,26 @@ function employeeEmailExistsError() {
     'EMPLOYEE_EMAIL_EXISTS',
     'An employee already uses that email address.',
     { email: ['Use an email address that is not already assigned to an employee.'] },
+  );
+}
+
+function completionExistsError() {
+  return new AppError(
+    409,
+    'COMPLETION_EXISTS',
+    'That course completion has already been recorded.',
+    {
+      completedOn: [
+        'A non-voided completion already exists for this employee, course, and date.',
+      ],
+    },
+  );
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
   );
 }
 
@@ -272,6 +302,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
             include: { medical: true },
             orderBy: [{ completedOn: 'desc' }, { recordedAt: 'desc' }],
           },
+          pendingCompletions: {
+            where: { resolution: null },
+            include: coursePendingCompletionInclude,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          },
+          pendingMedicalCompletions: {
+            where: { resolution: null },
+            include: medicalPendingCompletionInclude,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          },
         },
       }),
       loadEmployeeAccountIndex(request),
@@ -288,6 +328,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       ),
       completions: employee.completions.map(dateFields),
       medicalCompletions: employee.medicalCompletions.map(dateFields),
+      pendingCompletions: employee.pendingCompletions.map(publicPendingCompletion),
+      pendingMedicalCompletions: employee.pendingMedicalCompletions.map(
+        publicPendingCompletion,
+      ),
     };
   });
 
@@ -715,6 +759,22 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     );
   });
 
+  app.get('/api/v1/admin/completions/:id', admin, async (request) => {
+    const completion = await (await getPrisma()).courseCompletion.findUnique({
+      where: { id: parseId(request) },
+      include: { employee: true, course: true },
+    });
+    ensureFound(
+      completion,
+      'COMPLETION_NOT_FOUND',
+      'The completion was not found.',
+    );
+    return dateFields({
+      ...completion,
+      employee: publicEmployeeRecord(completion.employee),
+    });
+  });
+
   app.post('/api/v1/admin/completions', admin, async (request, reply) => {
     const data = completionInput.parse(request.body);
     const prisma = await getPrisma();
@@ -741,6 +801,70 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     });
     return reply.status(201).send(dateFields(completion));
   });
+
+  app.post(
+    '/api/v1/admin/completions/:id/correct-dates',
+    admin,
+    async (request) => {
+      const id = parseId(request);
+      const data = completionDateCorrectionInput.parse(request.body);
+      const prisma = await getPrisma();
+      try {
+        const replacement = await prisma.$transaction(async (transaction) => {
+          await transaction.$queryRaw(
+            Prisma.sql`SELECT id FROM course_completion WHERE id = ${id}::uuid FOR UPDATE`,
+          );
+          const source = await transaction.courseCompletion.findUnique({
+            where: { id },
+          });
+          ensureFound(
+            source,
+            'COMPLETION_NOT_FOUND',
+            'The completion was not found.',
+          );
+          if (source.voidedAt) {
+            throw new AppError(
+              409,
+              'COMPLETION_ALREADY_VOIDED',
+              'The completion is already voided.',
+            );
+          }
+          ensureCompletionDatesChanged(source, data);
+
+          await transaction.courseCompletion.update({
+            where: { id },
+            data: {
+              voidedAt: new Date(),
+              voidedBySubject: request.auth.subject,
+              voidReason: data.reason,
+            },
+          });
+
+          return transaction.courseCompletion.create({
+            data: {
+              employeeId: source.employeeId,
+              courseId: source.courseId,
+              completedOn: parseDateOnly(data.completedOn),
+              expiresOn: parseDateOnly(data.expiresOn),
+              validityMonthsApplied: source.validityMonthsApplied,
+              expiryManuallySet: true,
+              comment: source.comment,
+              recordedBySubject: request.auth.subject,
+              correctsCompletionId: source.id,
+            },
+            include: { employee: true, course: true },
+          });
+        });
+        return dateFields({
+          ...replacement,
+          employee: publicEmployeeRecord(replacement.employee),
+        });
+      } catch (error) {
+        if (isUniqueConstraintError(error)) throw completionExistsError();
+        throw error;
+      }
+    },
+  );
 
   app.post('/api/v1/admin/completions/:id/void', admin, async (request) => {
     const data = voidInput.parse(request.body);
@@ -776,4 +900,5 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   });
 
   await registerMedicalAdminRoutes(app);
+  await registerPendingCompletionRoutes(app);
 }

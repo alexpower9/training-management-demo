@@ -85,6 +85,10 @@ test(
         `ALTER FUNCTION public.enforce_completion_void_only() OWNER TO ` +
           quoteIdentifier(migrationRole),
       );
+      await owner.$executeRawUnsafe(
+        `ALTER FUNCTION public.enforce_pending_completion_resolution_only() OWNER TO ` +
+          quoteIdentifier(migrationRole),
+      );
 
       const migrationUrl = new URL(ownerUrl);
       migrationUrl.username = migrationRole;
@@ -147,6 +151,273 @@ test(
       const medical = await runtime.medical.create({
         data: { name: `Policy Medical ${suffix}`, validityMonths: 12 },
       });
+      const course = await runtime.course.create({
+        data: { name: `Policy Course ${suffix}`, validityMonths: 12 },
+      });
+      await assert.rejects(
+        runtime.coursePendingCompletion.create({
+          data: {
+            employeeId,
+            courseId: course.id,
+            validityMonthsSnapshot: 12,
+            createdBySubject: 'policy-test',
+            resolution: 'CANCELLED',
+            resolvedAt: new Date(),
+            resolvedBySubject: 'policy-test',
+            cancellationReason: 'Inserted as resolved',
+          },
+        }),
+      );
+      await assert.rejects(
+        runtime.medicalPendingCompletion.create({
+          data: {
+            employeeId,
+            medicalId: medical.id,
+            validityMonthsSnapshot: 12,
+            createdBySubject: 'policy-test',
+            resolution: 'CANCELLED',
+            resolvedAt: new Date(),
+            resolvedBySubject: 'policy-test',
+            cancellationReason: 'Inserted as resolved',
+          },
+        }),
+      );
+
+      const otherCourse = await runtime.course.create({
+        data: { name: `Policy Other Course ${suffix}`, validityMonths: 12 },
+      });
+      const pendingCourse = await runtime.coursePendingCompletion.create({
+        data: {
+          employeeId,
+          courseId: course.id,
+          validityMonthsSnapshot: 12,
+          comment: 'Course confirmed later',
+          createdBySubject: 'policy-test',
+        },
+      });
+      const wrongCourseCompletion = await runtime.courseCompletion.create({
+        data: {
+          employeeId,
+          courseId: otherCourse.id,
+          completedOn: new Date('2026-02-01T00:00:00.000Z'),
+          expiresOn: new Date('2027-02-01T00:00:00.000Z'),
+          validityMonthsApplied: 12,
+          comment: 'Course confirmed later',
+          recordedBySubject: 'policy-test',
+        },
+      });
+      await assert.rejects(
+        runtime.coursePendingCompletion.update({
+          where: { id: pendingCourse.id },
+          data: {
+            resolution: 'FINALIZED',
+            resolvedAt: new Date(),
+            resolvedBySubject: 'policy-test',
+            completionId: wrongCourseCompletion.id,
+          },
+        }),
+      );
+      const matchingCourseCompletion = await runtime.courseCompletion.create({
+        data: {
+          employeeId,
+          courseId: course.id,
+          completedOn: new Date('2026-03-01T00:00:00.000Z'),
+          expiresOn: new Date('2027-03-01T00:00:00.000Z'),
+          validityMonthsApplied: 12,
+          comment: 'Course confirmed later',
+          recordedBySubject: 'policy-test',
+        },
+      });
+      assert.equal(matchingCourseCompletion.expiryManuallySet, false);
+      await runtime.coursePendingCompletion.update({
+        where: { id: pendingCourse.id },
+        data: {
+          resolution: 'FINALIZED',
+          resolvedAt: new Date(),
+          resolvedBySubject: 'policy-test',
+          completionId: matchingCourseCompletion.id,
+        },
+      });
+      await assert.rejects(
+        runtime.courseCompletion.create({
+          data: {
+            employeeId,
+            courseId: course.id,
+            completedOn: new Date('2026-04-01T00:00:00.000Z'),
+            expiresOn: new Date('2027-04-01T00:00:00.000Z'),
+            validityMonthsApplied: 12,
+            expiryManuallySet: true,
+            comment: 'Course confirmed later',
+            recordedBySubject: 'policy-test',
+          },
+        }),
+      );
+      await assert.rejects(
+        runtime.courseCompletion.create({
+          data: {
+            employeeId,
+            courseId: course.id,
+            completedOn: new Date('2026-04-01T00:00:00.000Z'),
+            expiresOn: new Date('2027-04-01T00:00:00.000Z'),
+            validityMonthsApplied: 12,
+            expiryManuallySet: true,
+            comment: 'Course confirmed later',
+            recordedBySubject: 'policy-test',
+            correctsCompletionId: matchingCourseCompletion.id,
+          },
+        }),
+      );
+      await runtime.courseCompletion.update({
+        where: { id: matchingCourseCompletion.id },
+        data: {
+          voidedAt: new Date(),
+          voidedBySubject: 'policy-test',
+          voidReason: 'Correcting the completion date',
+        },
+      });
+      await assert.rejects(
+        runtime.courseCompletion.create({
+          data: {
+            employeeId,
+            courseId: course.id,
+            completedOn: new Date('2026-04-01T00:00:00.000Z'),
+            expiresOn: new Date('2027-04-01T00:00:00.000Z'),
+            validityMonthsApplied: 12,
+            comment: 'Course confirmed later',
+            recordedBySubject: 'policy-test',
+            correctsCompletionId: matchingCourseCompletion.id,
+          },
+        }),
+      );
+      await assert.rejects(
+        runtime.courseCompletion.create({
+          data: {
+            employeeId,
+            courseId: course.id,
+            completedOn: new Date('2026-04-01T00:00:00.000Z'),
+            expiresOn: new Date('2027-04-01T00:00:00.000Z'),
+            validityMonthsApplied: 12,
+            expiryManuallySet: true,
+            comment: 'Changed during correction',
+            recordedBySubject: 'different-policy-actor',
+            correctsCompletionId: matchingCourseCompletion.id,
+          },
+        }),
+      );
+      const courseCorrection = await runtime.courseCompletion.create({
+        data: {
+          employeeId,
+          courseId: course.id,
+          completedOn: new Date('2026-04-01T00:00:00.000Z'),
+          expiresOn: new Date('2027-04-01T00:00:00.000Z'),
+          validityMonthsApplied: 12,
+          expiryManuallySet: true,
+          comment: 'Course confirmed later',
+          recordedBySubject: 'policy-test',
+          correctsCompletionId: matchingCourseCompletion.id,
+        },
+      });
+      assert.equal(courseCorrection.expiryManuallySet, true);
+      await assert.rejects(
+        runtime.courseCompletion.update({
+          where: { id: courseCorrection.id },
+          data: { expiryManuallySet: false },
+        }),
+      );
+      await assert.rejects(
+        runtime.courseCompletion.create({
+          data: {
+            employeeId,
+            courseId: course.id,
+            completedOn: new Date('2026-05-01T00:00:00.000Z'),
+            expiresOn: new Date('2027-05-01T00:00:00.000Z'),
+            validityMonthsApplied: 12,
+            expiryManuallySet: true,
+            comment: 'Course confirmed later',
+            recordedBySubject: 'policy-test',
+            correctsCompletionId: matchingCourseCompletion.id,
+          },
+        }),
+      );
+
+      const pendingToCancel = await runtime.medicalPendingCompletion.create({
+        data: {
+          employeeId,
+          medicalId: medical.id,
+          validityMonthsSnapshot: 12,
+          comment: 'Waiting for confirmed date',
+          createdBySubject: 'policy-test',
+        },
+      });
+      await assert.rejects(
+        runtime.medicalPendingCompletion.create({
+          data: {
+            employeeId,
+            medicalId: medical.id,
+            validityMonthsSnapshot: 12,
+            createdBySubject: 'policy-test',
+          },
+        }),
+      );
+      await assert.rejects(
+        runtime.medicalPendingCompletion.update({
+          where: { id: pendingToCancel.id },
+          data: { comment: 'History rewrite' },
+        }),
+      );
+      await assert.rejects(
+        runtime.medicalPendingCompletion.update({
+          where: { id: pendingToCancel.id },
+          data: { resolution: 'CANCELLED' },
+        }),
+      );
+      await runtime.medicalPendingCompletion.update({
+        where: { id: pendingToCancel.id },
+        data: {
+          resolution: 'CANCELLED',
+          resolvedAt: new Date(),
+          resolvedBySubject: 'policy-test',
+          cancellationReason: 'No longer required',
+        },
+      });
+      await assert.rejects(
+        runtime.medicalPendingCompletion.update({
+          where: { id: pendingToCancel.id },
+          data: { cancellationReason: 'Rewritten reason' },
+        }),
+      );
+
+      const pendingToFinalize = await runtime.medicalPendingCompletion.create({
+        data: {
+          employeeId,
+          medicalId: medical.id,
+          validityMonthsSnapshot: 12,
+          comment: 'Confirmed later',
+          createdBySubject: 'policy-test',
+        },
+      });
+      const wrongMedicalCompletion = await runtime.medicalCompletion.create({
+        data: {
+          employeeId,
+          medicalId: medical.id,
+          completedOn: new Date('2025-01-01T00:00:00.000Z'),
+          expiresOn: new Date('2025-07-01T00:00:00.000Z'),
+          validityMonthsApplied: 6,
+          comment: 'Not the pending comment',
+          recordedBySubject: 'different-policy-actor',
+        },
+      });
+      await assert.rejects(
+        runtime.medicalPendingCompletion.update({
+          where: { id: pendingToFinalize.id },
+          data: {
+            resolution: 'FINALIZED',
+            resolvedAt: new Date(),
+            resolvedBySubject: 'policy-test',
+            completionId: wrongMedicalCompletion.id,
+          },
+        }),
+      );
       const completion = await runtime.medicalCompletion.create({
         data: {
           employeeId,
@@ -154,9 +425,24 @@ test(
           completedOn: new Date('2026-01-01T00:00:00.000Z'),
           expiresOn: new Date('2027-01-01T00:00:00.000Z'),
           validityMonthsApplied: 12,
+          comment: 'Confirmed later',
           recordedBySubject: 'policy-test',
         },
       });
+      await runtime.medicalPendingCompletion.update({
+        where: { id: pendingToFinalize.id },
+        data: {
+          resolution: 'FINALIZED',
+          resolvedAt: new Date(),
+          resolvedBySubject: 'policy-test',
+          completionId: completion.id,
+        },
+      });
+      await assert.rejects(
+        runtime.medicalPendingCompletion.delete({
+          where: { id: pendingToFinalize.id },
+        }),
+      );
       await assert.rejects(
         runtime.medicalCompletion.update({
           where: { id: completion.id },
@@ -169,6 +455,52 @@ test(
           voidedAt: new Date(),
           voidedBySubject: 'policy-test',
           voidReason: 'Policy void check',
+        },
+      });
+      await assert.rejects(
+        runtime.medicalCompletion.create({
+          data: {
+            employeeId,
+            medicalId: medical.id,
+            completedOn: new Date('2026-02-01T00:00:00.000Z'),
+            expiresOn: new Date('2027-02-01T00:00:00.000Z'),
+            validityMonthsApplied: 12,
+            expiryManuallySet: true,
+            comment: 'Confirmed later',
+            recordedBySubject: 'policy-test',
+            correctsCompletionId: completion.id,
+            voidedAt: new Date(),
+            voidedBySubject: 'policy-test',
+            voidReason: 'Inserted already voided',
+          },
+        }),
+      );
+      await assert.rejects(
+        runtime.medicalCompletion.create({
+          data: {
+            employeeId,
+            medicalId: medical.id,
+            completedOn: new Date('2026-02-01T00:00:00.000Z'),
+            expiresOn: new Date('2026-08-01T00:00:00.000Z'),
+            validityMonthsApplied: 6,
+            expiryManuallySet: true,
+            comment: 'Confirmed later',
+            recordedBySubject: 'policy-test',
+            correctsCompletionId: completion.id,
+          },
+        }),
+      );
+      await runtime.medicalCompletion.create({
+        data: {
+          employeeId,
+          medicalId: medical.id,
+          completedOn: new Date('2026-02-01T00:00:00.000Z'),
+          expiresOn: new Date('2027-02-01T00:00:00.000Z'),
+          validityMonthsApplied: 12,
+          expiryManuallySet: true,
+          comment: 'Confirmed later',
+          recordedBySubject: 'policy-test',
+          correctsCompletionId: completion.id,
         },
       });
       await assert.rejects(
@@ -200,8 +532,33 @@ test(
     } finally {
       if (runtime) await runtime.$disconnect();
       if (migration) {
+        await migration.coursePendingCompletion.deleteMany({
+          where: { createdBySubject: 'policy-test' },
+        }).catch(() => undefined);
+        await migration.medicalPendingCompletion.deleteMany({
+          where: { createdBySubject: 'policy-test' },
+        }).catch(() => undefined);
+        await migration.courseCompletion.deleteMany({
+          where: {
+            correctsCompletionId: { not: null },
+            recordedBySubject: 'policy-test',
+          },
+        }).catch(() => undefined);
         await migration.medicalCompletion.deleteMany({
+          where: {
+            correctsCompletionId: { not: null },
+            recordedBySubject: 'policy-test',
+          },
+        }).catch(() => undefined);
+        await migration.courseCompletion.deleteMany({
           where: { recordedBySubject: 'policy-test' },
+        }).catch(() => undefined);
+        await migration.medicalCompletion.deleteMany({
+          where: {
+            recordedBySubject: {
+              in: ['policy-test', 'different-policy-actor'],
+            },
+          },
         }).catch(() => undefined);
         await migration.siteMedicalRequirement.deleteMany({
           where: { site: { name: `Policy Site ${suffix}` } },
@@ -211,6 +568,16 @@ test(
         }).catch(() => undefined);
         await migration.medical.deleteMany({
           where: { name: `Policy Medical ${suffix}` },
+        }).catch(() => undefined);
+        await migration.course.deleteMany({
+          where: {
+            name: {
+              in: [
+                `Policy Course ${suffix}`,
+                `Policy Other Course ${suffix}`,
+              ],
+            },
+          },
         }).catch(() => undefined);
         await migration.employee.deleteMany({
           where: { email: `policy.${suffix}@example.com` },

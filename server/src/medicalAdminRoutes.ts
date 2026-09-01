@@ -2,6 +2,10 @@ import { Prisma } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authenticate, requireAdmin } from './auth.js';
+import {
+  completionDateCorrectionInput,
+  ensureCompletionDatesChanged,
+} from './completionCorrection.js';
 import { getPrisma } from './database.js';
 import { addCalendarMonths, formatDateOnly, parseDateOnly } from './dates.js';
 import { publicEmployeeRecord } from './employeeSerialization.js';
@@ -364,6 +368,22 @@ export async function registerMedicalAdminRoutes(app: FastifyInstance) {
     );
   });
 
+  app.get('/api/v1/admin/medical-completions/:id', admin, async (request) => {
+    const completion = await (await getPrisma()).medicalCompletion.findUnique({
+      where: { id: parseId(request) },
+      include: { employee: true, medical: true },
+    });
+    ensureFound(
+      completion,
+      'MEDICAL_COMPLETION_NOT_FOUND',
+      'The medical completion was not found.',
+    );
+    return dateFields({
+      ...completion,
+      employee: publicEmployeeRecord(completion.employee),
+    });
+  });
+
   app.post('/api/v1/admin/medical-completions', admin, async (request, reply) => {
     const data = medicalCompletionInput.parse(request.body);
     const prisma = await getPrisma();
@@ -398,6 +418,70 @@ export async function registerMedicalAdminRoutes(app: FastifyInstance) {
       throw error;
     }
   });
+
+  app.post(
+    '/api/v1/admin/medical-completions/:id/correct-dates',
+    admin,
+    async (request) => {
+      const id = parseId(request);
+      const data = completionDateCorrectionInput.parse(request.body);
+      const prisma = await getPrisma();
+      try {
+        const replacement = await prisma.$transaction(async (transaction) => {
+          await transaction.$queryRaw(
+            Prisma.sql`SELECT id FROM medical_completion WHERE id = ${id}::uuid FOR UPDATE`,
+          );
+          const source = await transaction.medicalCompletion.findUnique({
+            where: { id },
+          });
+          ensureFound(
+            source,
+            'MEDICAL_COMPLETION_NOT_FOUND',
+            'The medical completion was not found.',
+          );
+          if (source.voidedAt) {
+            throw new AppError(
+              409,
+              'MEDICAL_COMPLETION_ALREADY_VOIDED',
+              'The medical completion is already voided.',
+            );
+          }
+          ensureCompletionDatesChanged(source, data);
+
+          await transaction.medicalCompletion.update({
+            where: { id },
+            data: {
+              voidedAt: new Date(),
+              voidedBySubject: request.auth.subject,
+              voidReason: data.reason,
+            },
+          });
+
+          return transaction.medicalCompletion.create({
+            data: {
+              employeeId: source.employeeId,
+              medicalId: source.medicalId,
+              completedOn: parseDateOnly(data.completedOn),
+              expiresOn: parseDateOnly(data.expiresOn),
+              validityMonthsApplied: source.validityMonthsApplied,
+              expiryManuallySet: true,
+              comment: source.comment,
+              recordedBySubject: request.auth.subject,
+              correctsCompletionId: source.id,
+            },
+            include: { employee: true, medical: true },
+          });
+        });
+        return dateFields({
+          ...replacement,
+          employee: publicEmployeeRecord(replacement.employee),
+        });
+      } catch (error) {
+        if (isUniqueConstraintError(error)) throw medicalCompletionExistsError();
+        throw error;
+      }
+    },
+  );
 
   app.post(
     '/api/v1/admin/medical-completions/:id/void',

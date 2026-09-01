@@ -3,10 +3,38 @@ import demoData from '../../src/data/trainingDemoData.json' with { type: 'json' 
 
 const prisma = new PrismaClient();
 const recordedAt = new Date('2026-06-05T12:00:00.000Z');
-async function main() {
+
+async function deleteCompletionHistory() {
+  // Correction links are restrictive and may form an append-only chain. Delete
+  // each chain from its leaf before removing the remaining source rows.
+  for (;;) {
+    const result = await prisma.medicalCompletion.deleteMany({
+      where: {
+        correctsCompletionId: { not: null },
+        correctedByCompletion: null,
+      },
+    });
+    if (result.count === 0) break;
+  }
+  for (;;) {
+    const result = await prisma.courseCompletion.deleteMany({
+      where: {
+        correctsCompletionId: { not: null },
+        correctedByCompletion: null,
+      },
+    });
+    if (result.count === 0) break;
+  }
+
   await prisma.medicalCompletion.deleteMany();
-  await prisma.siteMedicalRequirement.deleteMany();
   await prisma.courseCompletion.deleteMany();
+}
+
+async function main() {
+  await prisma.medicalPendingCompletion.deleteMany();
+  await prisma.coursePendingCompletion.deleteMany();
+  await deleteCompletionHistory();
+  await prisma.siteMedicalRequirement.deleteMany();
   await prisma.siteCourseRequirement.deleteMany();
   await prisma.medical.deleteMany();
   await prisma.course.deleteMany();

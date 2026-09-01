@@ -44,6 +44,16 @@ test('employee sees only their own training and medical readiness', async ({
     courseId: course.id,
     completedOn: '2026-01-31',
   });
+  const pendingCourse = await create(request, '/courses', {
+    name: `Pending Employee Course ${suffix}`,
+    validityMonths: 12,
+    siteIds: [site.id],
+  });
+  await create(request, '/pending-completions', {
+    employeeId: employee.id,
+    courseId: pendingCourse.id,
+    comment: 'Private pending training note',
+  });
   const medical = await create(request, '/medicals', {
     name: `Employee Medical ${suffix}`,
     validityMonths: 12,
@@ -54,6 +64,16 @@ test('employee sees only their own training and medical readiness', async ({
     medicalId: medical.id,
     completedOn: '2026-01-31',
     comment: 'Private administrator comment',
+  });
+  const pendingMedical = await create(request, '/medicals', {
+    name: `Pending Employee Medical ${suffix}`,
+    validityMonths: 12,
+    siteIds: [site.id],
+  });
+  await create(request, '/medical-pending-completions', {
+    employeeId: employee.id,
+    medicalId: pendingMedical.id,
+    comment: 'Private pending medical note',
   });
   await page.goto('/training');
 
@@ -69,14 +89,26 @@ test('employee sees only their own training and medical readiness', async ({
     page.getByText(`${employee.displayName} at ${site.name}`, { exact: true }),
   ).toBeVisible();
   await expect(page.getByText(course.name, { exact: true })).toBeVisible();
+  const pendingCourseRow = page
+    .locator('.requirement-row')
+    .filter({ hasText: pendingCourse.name });
+  await expect(pendingCourseRow).toContainText('Incomplete');
+  await expect(page.getByText('Private pending training note')).toHaveCount(0);
+  await expect(page.getByText('Pending date', { exact: true })).toHaveCount(0);
 
   await page.goto('/medical');
   await expect(page.getByRole('heading', { name: 'My medical readiness' })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Employee' })).toHaveCount(0);
   await page.locator('tbody tr').filter({ hasText: site.name }).click();
   await expect(page.getByText(medical.name, { exact: true })).toBeVisible();
+  const pendingMedicalRow = page
+    .locator('.requirement-row')
+    .filter({ hasText: pendingMedical.name });
+  await expect(pendingMedicalRow).toContainText('Incomplete');
   await expect(page.getByText(`Other Employee ${suffix}`, { exact: true })).toHaveCount(0);
   await expect(page.getByText('Private administrator comment')).toHaveCount(0);
+  await expect(page.getByText('Private pending medical note')).toHaveCount(0);
+  await expect(page.getByText('Pending date', { exact: true })).toHaveCount(0);
 
   await page.goto('/manage');
   await expect(page).toHaveURL(/\/training$/);
@@ -89,6 +121,8 @@ test('employee sees only their own training and medical readiness', async ({
     '/api/v1/admin/employees',
     '/api/v1/admin/medicals',
     '/api/v1/admin/medical-completions',
+    '/api/v1/admin/pending-completions',
+    '/api/v1/admin/medical-pending-completions',
   ]) {
     const response = await request.get(path, {
       headers: {

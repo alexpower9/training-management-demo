@@ -162,7 +162,7 @@ Create an Amazon RDS for PostgreSQL instance with:
 
 The migration and privilege automation assumes that `nme_training` is a
 dedicated database and that its `public` schema is reserved for this
-application. All Prisma migrations, `_prisma_migrations`, and the eight
+application. All Prisma migrations, `_prisma_migrations`, and the ten
 business tables must be in that schema. Do not point the automation at a
 database whose `public` schema contains another application's objects. The
 migration step revokes public schema creation, resets the runtime role's table
@@ -187,6 +187,9 @@ The application user should have:
 - `SELECT` and `INSERT` on `course_completion` and `medical_completion`, plus
   column-level `UPDATE` only on `voided_at`, `voided_by_subject`, and
   `void_reason`;
+- `SELECT` and `INSERT` on `course_pending_completion` and
+  `medical_pending_completion`, plus column-level `UPDATE` only on their
+  resolution metadata;
 - no sequence privileges (the current schema uses UUID defaults);
 - no table-level completion `UPDATE`, no completion `DELETE`, and no assignment
   `UPDATE`; and
@@ -654,6 +657,9 @@ role's privileges and grants:
   `site_course_requirement` and `site_medical_requirement`; and
 - `SELECT` and `INSERT` on the two completion tables, with `UPDATE` limited to
   their `voided_at`, `voided_by_subject`, and `void_reason` columns.
+- `SELECT` and `INSERT` on the two pending-completion tables, with `UPDATE`
+  limited to resolution, resolution actor/time, cancellation reason, and the
+  finalized completion link.
 
 It grants no sequence privileges; current primary keys use UUID defaults. The
 migration owner explicitly gives the runtime role no automatic default table
@@ -777,7 +783,13 @@ already applied to production. In particular, confirm that no applied migration
 removed or changed a table, column, constraint, or payload the older API
 requires, and exercise the rollback artifact against a current-schema staging
 copy. The Medical migration is additive, so a preceding application release
-that ignores the new tables is schema-compatible once this check passes.
+that ignores the new tables is schema-compatible once this check passes. The
+pending-date migration is additive as well: an older application temporarily
+hides pending work but leaves both pending tables and their audit history
+preserved for the current release to resume after redeployment. The date-
+correction migration only adds completion metadata, self-referencing links,
+and stronger triggers; older releases continue reading ordinary completion
+rows and safely ignore correction metadata during a temporary rollback.
 
 Do not rerun migrations during an application-only rollback. From a rollback
 target whose deployment driver supports the guard, run:
@@ -876,30 +888,37 @@ Validate:
 8. Course and Medical create/edit atomically replace site assignments.
 9. Completion expiry is calculated from Course or Medical validity.
 10. January 31 expiry clamps correctly in February.
-11. Renewal and void workflows work.
-12. Course and Medical archive/restore preserve and suspend site assignments.
-13. Expired access tokens return `401`.
-14. Employee broad-read and mutation requests return `403`.
-15. The browser never receives database credentials or temporary passwords.
-16. RDS is not publicly reachable.
-17. The API is not reachable directly on port 3000.
-18. A backup can be restored into a separate RDS instance.
-19. A previous application release passes current-schema compatibility checks
+11. Renewal, audited completion/expiration date correction, and void workflows
+    work in both Training and Medical; corrections retain the original row.
+12. Blank Training and Medical entries create pending dates that do not change
+    readiness; finalization and cancellation retain their history.
+13. Pending dates snapshot validity, allow archived-record finalization, and
+    allow one open renewal alongside a current completion.
+14. Course and Medical archive/restore preserve and suspend site assignments.
+15. Expired access tokens return `401`.
+16. Employee broad-read and mutation requests return `403`.
+17. The browser never receives database credentials or temporary passwords.
+18. RDS is not publicly reachable.
+19. The API is not reachable directly on port 3000.
+20. A backup can be restored into a separate RDS instance.
+21. A previous application release passes current-schema compatibility checks
     and can be redeployed without starting the migration service.
-20. The migration creates empty Medical tables without changing Course counts
+22. The migration creates empty Medical tables without changing Course counts
     or Training readiness.
-21. The runtime role can manage Medical catalogue records and assignments and
+23. The runtime role can manage Medical catalogue records and assignments and
     can insert/void Medical completions, but cannot change immutable completion
     facts or delete completion history; the migration service uses
     migration-owner credentials.
-22. The migration unit refuses shared migration/runtime roles, verifies the
-    eight-table runtime allowlist, and completes before the API is restarted.
-23. The database is dedicated to this application, all Prisma objects are in
+24. The runtime role can create and resolve pending records but cannot rewrite
+    their immutable facts, reopen them, or delete their history.
+25. The migration unit refuses shared migration/runtime roles, verifies the
+    ten-table runtime allowlist, and completes before the API is restarted.
+26. The database is dedicated to this application, all Prisma objects are in
     `public`, and the migration role owns the database, schema, history, tables,
     and sequences.
-24. The API service has no direct `DATABASE_URL` and cannot read
+27. The API service has no direct `DATABASE_URL` and cannot read
     `migration.env`; the dedicated migration identity is not used by the API.
-25. When CI/CodeBuild runs migrations, the EC2 role cannot retrieve the
+28. When CI/CodeBuild runs migrations, the EC2 role cannot retrieve the
     migration secret and the exact application commit deploys with the
     migration-skip guard only after the protected job succeeds.
 

@@ -194,9 +194,11 @@ restore reactivates the saved assignments.
 
 The section has Training and Medical modes selected by
 `type=training|medical`. A missing or invalid value defaults to Training so
-existing links remain compatible. Each mode has its own correctly paginated
-history and uses the matching catalogue, option list, completion table, and
-API; the same entry, expiry, renewal, comment, and void rules apply to both.
+existing links remain compatible. A second `view=pending|history` switch keeps
+pending dates separate from immutable completion history; missing or invalid
+values default to history. Pending and history views keep independent search
+and pagination state, while each domain uses its matching catalogue, workflow
+table, completion table, and API.
 
 Changing modes preserves search and `Show voided`, then resets the page,
 selected completion, open drawers and dialogs, and incompatible course or
@@ -208,23 +210,34 @@ Completion entry is optimized for the common workflow:
 
 1. Choose an employee.
 2. Choose an active course or medical for the selected mode.
-3. Enter the completion date.
+3. Enter the completion date when known, or leave it blank.
 4. Optionally add a short comment.
-5. Review the automatically calculated expiry.
-6. Save.
+5. Review the automatically calculated expiry when dated, or the pending-date
+   notice when blank.
+6. Save a dated completion or pending record.
 
 Calculated expiry previews the selected course or medical validity period and
 month-end clamping. The saved validity snapshot prevents later catalogue
 changes from rewriting existing completion expiry.
 
+Pending dates are management-only and never affect readiness. The pending view
+supports search, pagination, exact-record links, and an option to show resolved
+records. Open records can be finalized once with a required date or cancelled
+with a reason. Finalization uses the validity captured when the pending record
+was created, then produces a normal immutable completion. Employee detail
+shows open Training and Medical pending records with direct `Add date` links.
+
 History can be searched and filtered by employee, active mode item, and void
 state. Comments appear in completion detail and can be opened from compact
 history rows without changing the default list layout. They are management
 data visible to administrators and owners, never employee readiness data.
-Completion rows are not edited:
+Completion rows are never rewritten in place:
 
 - Renewal opens a new entry in the active mode, prefilled with the employee and
   corresponding course or medical.
+- `Edit dates` permits both completion and expiration dates to change and
+  requires a reason. Saving atomically voids the original immutable row and
+  creates a linked replacement.
 - Void requires a reason and preserves the original row.
 
 Bulk entry, attachments, and spreadsheet import remain outside v1.
@@ -289,8 +302,10 @@ There are no optimistic concurrency version fields or edit-conflict flows.
 | Medical | Yes | Name/validity/sites | Archive/restore | No |
 | Course site assignment | Through course | Through course | Preserved on archive | No |
 | Medical site assignment | Through medical | Through medical | Preserved on archive | No |
-| Course completion | Yes | No | Renew with a new row; void with reason | No |
-| Medical completion | Yes | No | Renew with a new row; void with reason | No |
+| Course completion | Yes | No | Renew, correct dates, or void with reason | No |
+| Medical completion | Yes | No | Renew, correct dates, or void with reason | No |
+| Course pending completion | Yes | No | Finalize once or cancel with reason | No |
+| Medical pending completion | Yes | No | Finalize once or cancel with reason | No |
 
 Course and Medical updates replace their own current site assignment set
 atomically without affecting the other domain.
@@ -310,7 +325,13 @@ atomically without affecting the other domain.
   months and preview calculated expiry from the matching type.
 - Reject duplicate non-voided employee, item, and completion-date occurrences
   independently in each domain.
+- Require a corrected expiration date on or after its corrected completion
+  date, retain the original as voided history, and link no more than one
+  replacement to a source row.
+- Permit only one open pending date per employee and item in each domain.
 - Require a reason when voiding a completion.
+- Require a reason when cancelling a pending date and preserve both finalized
+  and cancelled workflow history.
 
 ## Accessibility And Responsive Behavior
 

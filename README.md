@@ -6,7 +6,7 @@ Internal training and medical-compliance application for Northern Mining Equipme
 
 - `src/`: Vue Training, Medical, and management workspaces with Cognito authentication.
 - `server/`: Fastify TypeScript API with Cognito JWT verification and Prisma.
-- `server/prisma/`: Eight-table PostgreSQL schema, additive migrations, and canonical demo seed.
+- `server/prisma/`: Ten-table PostgreSQL schema, additive migrations, and canonical demo seed.
 - `deploy/`: Nginx and systemd templates for an EC2 deployment.
 
 The browser never connects directly to PostgreSQL. Production traffic follows:
@@ -52,6 +52,14 @@ tables while sharing employees and sites with Training. The canonical seed
 deliberately starts the Medical catalogue empty. Site access requires every
 configured course and medical to be current; a domain with no requirements is
 neutral, while a site with no requirements in either domain remains ineligible.
+
+Administrators and owners may also save a per-employee Training or Medical
+entry with its completion date pending. Pending-date records are kept apart
+from immutable completion history, never satisfy readiness, and can later be
+finalized into a dated completion or cancelled with a retained reason.
+Administrators and owners can also correct a saved completion and expiration
+date; the application voids the original immutable row and creates a linked
+replacement so the full correction history remains auditable.
 
 ## Verification
 
@@ -148,7 +156,7 @@ profiles. Production startup rejects configuring both sources. Production
 migrations require a distinct
 `MIGRATION_DATABASE_SECRET_ARN` and database-owner role. The protected
 migration command applies migrations, grants the runtime role only the
-documented eight-table DML allowlist, and reconnects with the runtime secret to
+documented ten-table DML allowlist, and reconnects with the runtime secret to
 verify those privileges before the API restarts. Secret-based production
 connections also require `RDS_CA_CERT_PATH` and use strict certificate
 verification. Keep this application in a dedicated database and `public`

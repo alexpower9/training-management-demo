@@ -22,6 +22,8 @@ test(
       import('./database.js'),
     ]);
     const prisma = await getPrisma();
+    await prisma.medicalPendingCompletion.deleteMany();
+    await prisma.coursePendingCompletion.deleteMany();
     await prisma.medicalCompletion.deleteMany();
     await prisma.courseCompletion.deleteMany();
     await prisma.siteMedicalRequirement.deleteMany();
@@ -427,6 +429,81 @@ test(
         JSON.stringify(courseDetailWithCompletion.json()).includes('cognitoSubject'),
         false,
       );
+      const completionDetailResponse = await request(
+        'GET',
+        `/api/v1/admin/completions/${completionResponse.json().id}`,
+      );
+      assert.equal(completionDetailResponse.statusCode, 200);
+      assert.equal(completionDetailResponse.json().course.id, course.id);
+      assert.equal(completionDetailResponse.json().completedOn, '2024-01-31');
+      assert.equal(
+        JSON.stringify(completionDetailResponse.json()).includes('cognitoSubject'),
+        false,
+      );
+
+      const pendingCourseResponse = await request(
+        'POST',
+        '/api/v1/admin/pending-completions',
+        {
+          employeeId: employee.id,
+          courseId: course.id,
+          comment: 'Waiting for the technician to confirm the date.',
+        },
+      );
+      assert.equal(pendingCourseResponse.statusCode, 201);
+      const pendingCourse = pendingCourseResponse.json();
+      assert.equal(pendingCourse.status, 'pending');
+      assert.equal(pendingCourse.validityMonthsSnapshot, 1);
+      assert.equal(pendingCourse.completion, null);
+      assert.equal('resolution' in pendingCourse, false);
+      assert.equal(
+        JSON.stringify(pendingCourse).includes('cognitoSubject'),
+        false,
+      );
+
+      const duplicatePendingCourseResponse = await request(
+        'POST',
+        '/api/v1/admin/pending-completions',
+        {
+          employeeId: employee.id,
+          courseId: course.id,
+        },
+      );
+      assert.equal(duplicatePendingCourseResponse.statusCode, 409);
+      assert.equal(
+        duplicatePendingCourseResponse.json().code,
+        'PENDING_COMPLETION_EXISTS',
+      );
+
+      const pendingCourseList = await request(
+        'GET',
+        `/api/v1/admin/pending-completions?employeeId=${employee.id}&courseId=${course.id}&search=Calendar`,
+      );
+      assert.equal(pendingCourseList.statusCode, 200);
+      assert.equal(pendingCourseList.json().total, 1);
+      assert.equal(pendingCourseList.json().items[0].id, pendingCourse.id);
+
+      const pendingCourseDetail = await request(
+        'GET',
+        `/api/v1/admin/pending-completions/${pendingCourse.id}`,
+      );
+      assert.equal(pendingCourseDetail.statusCode, 200);
+      assert.equal(pendingCourseDetail.json().status, 'pending');
+
+      const employeeWithPendingCourse = await request(
+        'GET',
+        `/api/v1/admin/employees/${employee.id}`,
+      );
+      assert.deepEqual(
+        employeeWithPendingCourse
+          .json()
+          .pendingCompletions.map((pending: { id: string }) => pending.id),
+        [pendingCourse.id],
+      );
+      assert.deepEqual(
+        employeeWithPendingCourse.json().pendingMedicalCompletions,
+        [],
+      );
 
       const blankCommentResponse = await request(
         'POST',
@@ -496,6 +573,258 @@ test(
           .json()
           .requirements.map((requirement: { siteId: string }) => requirement.siteId),
         [site.id],
+      );
+
+      assert.equal(
+        (
+          await request(
+            'POST',
+            `/api/v1/admin/employees/${employee.id}/archive`,
+          )
+        ).statusCode,
+        200,
+      );
+      assert.equal(
+        (
+          await request('POST', `/api/v1/admin/courses/${course.id}/archive`)
+        ).statusCode,
+        200,
+      );
+      const archivedEmployeePendingResponse = await request(
+        'POST',
+        '/api/v1/admin/pending-completions',
+        { employeeId: employee.id, courseId: noSiteCourse.id },
+      );
+      assert.equal(archivedEmployeePendingResponse.statusCode, 404);
+      assert.equal(
+        archivedEmployeePendingResponse.json().code,
+        'EMPLOYEE_NOT_FOUND',
+      );
+
+      const correctedCourseCompletionResponse = await request(
+        'POST',
+        `/api/v1/admin/completions/${blankCommentResponse.json().id}/correct-dates`,
+        {
+          completedOn: '2024-02-29',
+          expiresOn: '2024-12-31',
+          reason: '  Corrected from the technician certificate.  ',
+        },
+      );
+      assert.equal(correctedCourseCompletionResponse.statusCode, 200);
+      const correctedCourseCompletion = correctedCourseCompletionResponse.json();
+      assert.equal(
+        correctedCourseCompletion.correctsCompletionId,
+        blankCommentResponse.json().id,
+      );
+      assert.equal(correctedCourseCompletion.expiryManuallySet, true);
+      assert.equal(correctedCourseCompletion.completedOn, '2024-02-29');
+      assert.equal(correctedCourseCompletion.expiresOn, '2024-12-31');
+      assert.equal(correctedCourseCompletion.validityMonthsApplied, 1);
+      assert.equal(correctedCourseCompletion.comment, null);
+      assert.equal(correctedCourseCompletion.recordedBySubject, 'integration-owner');
+      assert.equal(correctedCourseCompletion.employee.id, employee.id);
+      assert.equal(correctedCourseCompletion.course.id, course.id);
+
+      const correctedCourseSource = await request(
+        'GET',
+        `/api/v1/admin/completions/${blankCommentResponse.json().id}`,
+      );
+      assert.equal(correctedCourseSource.statusCode, 200);
+      assert.ok(correctedCourseSource.json().voidedAt);
+      assert.equal(
+        correctedCourseSource.json().voidReason,
+        'Corrected from the technician certificate.',
+      );
+      assert.equal(
+        correctedCourseSource.json().voidedBySubject,
+        'integration-owner',
+      );
+
+      const correctVoidedCourseResponse = await request(
+        'POST',
+        `/api/v1/admin/completions/${blankCommentResponse.json().id}/correct-dates`,
+        {
+          completedOn: '2024-03-01',
+          expiresOn: '2025-03-01',
+          reason: 'Second correction attempt.',
+        },
+      );
+      assert.equal(correctVoidedCourseResponse.statusCode, 409);
+      assert.equal(
+        correctVoidedCourseResponse.json().code,
+        'COMPLETION_ALREADY_VOIDED',
+      );
+
+      const duplicateCourseCorrectionResponse = await request(
+        'POST',
+        `/api/v1/admin/completions/${completionResponse.json().id}/correct-dates`,
+        {
+          completedOn: '2024-02-29',
+          expiresOn: '2025-02-28',
+          reason: 'Duplicate corrected date rollback test.',
+        },
+      );
+      assert.equal(duplicateCourseCorrectionResponse.statusCode, 409);
+      assert.equal(duplicateCourseCorrectionResponse.json().code, 'COMPLETION_EXISTS');
+      const courseSourceAfterCorrectionRollback = await request(
+        'GET',
+        `/api/v1/admin/completions/${completionResponse.json().id}`,
+      );
+      assert.equal(courseSourceAfterCorrectionRollback.json().voidedAt, null);
+
+      const noOpCourseCorrectionResponse = await request(
+        'POST',
+        `/api/v1/admin/completions/${completionResponse.json().id}/correct-dates`,
+        {
+          completedOn: '2024-01-31',
+          expiresOn: '2024-02-29',
+          reason: 'No-op correction test.',
+        },
+      );
+      assert.equal(noOpCourseCorrectionResponse.statusCode, 400);
+      assert.equal(
+        noOpCourseCorrectionResponse.json().code,
+        'COMPLETION_DATES_UNCHANGED',
+      );
+
+      await assert.rejects(
+        prisma.courseCompletion.update({
+          where: { id: correctedCourseCompletion.id },
+          data: { expiresOn: new Date('2025-12-31T00:00:00.000Z') },
+        }),
+        /Completion facts are immutable/,
+      );
+      const finalizedPendingCourseResponse = await request(
+        'POST',
+        `/api/v1/admin/pending-completions/${pendingCourse.id}/finalize`,
+        { completedOn: '2024-03-31' },
+      );
+      assert.equal(finalizedPendingCourseResponse.statusCode, 200);
+      const finalizedPendingCourse = finalizedPendingCourseResponse.json();
+      assert.equal(finalizedPendingCourse.status, 'finalized');
+      assert.equal(finalizedPendingCourse.validityMonthsSnapshot, 1);
+      assert.equal(finalizedPendingCourse.completion.completedOn, '2024-03-31');
+      assert.equal(finalizedPendingCourse.completion.expiresOn, '2024-04-30');
+      assert.equal(finalizedPendingCourse.completion.validityMonthsApplied, 1);
+      assert.equal(
+        finalizedPendingCourse.completion.comment,
+        'Waiting for the technician to confirm the date.',
+      );
+      assert.equal(
+        finalizedPendingCourse.completion.recordedBySubject,
+        'integration-owner',
+      );
+
+      const finalizedCompletionDetail = await request(
+        'GET',
+        `/api/v1/admin/completions/${finalizedPendingCourse.completionId}`,
+      );
+      assert.equal(finalizedCompletionDetail.statusCode, 200);
+      assert.equal(finalizedCompletionDetail.json().expiresOn, '2024-04-30');
+
+      const finalizeCourseAgainResponse = await request(
+        'POST',
+        `/api/v1/admin/pending-completions/${pendingCourse.id}/finalize`,
+        { completedOn: '2024-04-01' },
+      );
+      assert.equal(finalizeCourseAgainResponse.statusCode, 409);
+      assert.equal(
+        finalizeCourseAgainResponse.json().code,
+        'PENDING_COMPLETION_ALREADY_RESOLVED',
+      );
+
+      await request('POST', `/api/v1/admin/employees/${employee.id}/restore`);
+      const archivedCoursePendingResponse = await request(
+        'POST',
+        '/api/v1/admin/pending-completions',
+        { employeeId: employee.id, courseId: course.id },
+      );
+      assert.equal(archivedCoursePendingResponse.statusCode, 404);
+      assert.equal(archivedCoursePendingResponse.json().code, 'COURSE_NOT_FOUND');
+      await request('POST', `/api/v1/admin/courses/${course.id}/restore`);
+
+      const duplicateDatePendingResponse = await request(
+        'POST',
+        '/api/v1/admin/pending-completions',
+        { employeeId: employee.id, courseId: course.id },
+      );
+      assert.equal(duplicateDatePendingResponse.statusCode, 201);
+      const duplicateDatePending = duplicateDatePendingResponse.json();
+      assert.equal(duplicateDatePending.validityMonthsSnapshot, 2);
+
+      const duplicateDateFinalizeResponse = await request(
+        'POST',
+        `/api/v1/admin/pending-completions/${duplicateDatePending.id}/finalize`,
+        { completedOn: '2024-01-31' },
+      );
+      assert.equal(duplicateDateFinalizeResponse.statusCode, 409);
+      assert.equal(duplicateDateFinalizeResponse.json().code, 'COMPLETION_EXISTS');
+      const stillOpenPending = await request(
+        'GET',
+        `/api/v1/admin/pending-completions/${duplicateDatePending.id}`,
+      );
+      assert.equal(stillOpenPending.json().status, 'pending');
+      assert.equal(stillOpenPending.json().completionId, null);
+
+      const cancelledPendingCourseResponse = await request(
+        'POST',
+        `/api/v1/admin/pending-completions/${duplicateDatePending.id}/cancel`,
+        { reason: '  Technician confirmed this was entered in error.  ' },
+      );
+      assert.equal(cancelledPendingCourseResponse.statusCode, 200);
+      assert.equal(cancelledPendingCourseResponse.json().status, 'cancelled');
+      assert.equal(
+        cancelledPendingCourseResponse.json().cancellationReason,
+        'Technician confirmed this was entered in error.',
+      );
+
+      const resolvedPendingCourseList = await request(
+        'GET',
+        `/api/v1/admin/pending-completions?employeeId=${employee.id}&includeResolved=true`,
+      );
+      assert.equal(resolvedPendingCourseList.statusCode, 200);
+      assert.equal(resolvedPendingCourseList.json().total, 2);
+      assert.deepEqual(
+        resolvedPendingCourseList
+          .json()
+          .items.map((pending: { status: string }) => pending.status)
+          .sort(),
+        ['cancelled', 'finalized'],
+      );
+
+      const concurrentPendingResponse = await request(
+        'POST',
+        '/api/v1/admin/pending-completions',
+        { employeeId: employee.id, courseId: course.id },
+      );
+      assert.equal(concurrentPendingResponse.statusCode, 201);
+      const concurrentPendingId = concurrentPendingResponse.json().id;
+      const concurrentResolutionResponses = await Promise.all([
+        request(
+          'POST',
+          `/api/v1/admin/pending-completions/${concurrentPendingId}/finalize`,
+          { completedOn: '2025-01-31' },
+        ),
+        request(
+          'POST',
+          `/api/v1/admin/pending-completions/${concurrentPendingId}/cancel`,
+          { reason: 'Concurrent cancellation test.' },
+        ),
+      ]);
+      assert.deepEqual(
+        concurrentResolutionResponses
+          .map((response) => response.statusCode)
+          .sort((left, right) => left - right),
+        [200, 409],
+      );
+      const concurrentlyResolvedPending = await request(
+        'GET',
+        `/api/v1/admin/pending-completions/${concurrentPendingId}`,
+      );
+      assert.ok(
+        ['finalized', 'cancelled'].includes(
+          concurrentlyResolvedPending.json().status,
+        ),
       );
 
       const storedCompletion = await prisma.courseCompletion.findUnique({
@@ -583,6 +912,7 @@ test(
           employeeId: employee.id,
           medicalId: noSiteMedical.id,
           completedOn: '2026-05-01',
+          comment: 'Original no-site medical certificate.',
         },
       );
       assert.equal(noSiteMedicalCompletionResponse.statusCode, 201);
@@ -617,6 +947,166 @@ test(
         ),
         false,
       );
+
+      const medicalCompletionDetailResponse = await request(
+        'GET',
+        `/api/v1/admin/medical-completions/${medicalCompletionResponse.json().id}`,
+      );
+      assert.equal(medicalCompletionDetailResponse.statusCode, 200);
+      assert.equal(medicalCompletionDetailResponse.json().medical.id, medical.id);
+      assert.equal(
+        medicalCompletionDetailResponse.json().completedOn,
+        '2026-05-31',
+      );
+
+      const pendingMedicalResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-pending-completions',
+        {
+          employeeId: employee.id,
+          medicalId: medical.id,
+          comment: 'Awaiting the medical certificate date.',
+        },
+      );
+      assert.equal(pendingMedicalResponse.statusCode, 201);
+      const pendingMedical = pendingMedicalResponse.json();
+      assert.equal(pendingMedical.status, 'pending');
+      assert.equal(pendingMedical.validityMonthsSnapshot, 1);
+      assert.equal(pendingMedical.completion, null);
+
+      const duplicatePendingMedicalResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-pending-completions',
+        { employeeId: employee.id, medicalId: medical.id },
+      );
+      assert.equal(duplicatePendingMedicalResponse.statusCode, 409);
+      assert.equal(
+        duplicatePendingMedicalResponse.json().code,
+        'MEDICAL_PENDING_COMPLETION_EXISTS',
+      );
+
+      const duplicateMedicalDatePendingResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-pending-completions',
+        { employeeId: compliantEmployee.id, medicalId: medical.id },
+      );
+      assert.equal(duplicateMedicalDatePendingResponse.statusCode, 201);
+      const duplicateMedicalDateFinalizeResponse = await request(
+        'POST',
+        `/api/v1/admin/medical-pending-completions/${duplicateMedicalDatePendingResponse.json().id}/finalize`,
+        { completedOn: '2026-05-31' },
+      );
+      assert.equal(duplicateMedicalDateFinalizeResponse.statusCode, 409);
+      assert.equal(
+        duplicateMedicalDateFinalizeResponse.json().code,
+        'MEDICAL_COMPLETION_EXISTS',
+      );
+      const stillOpenMedicalPending = await request(
+        'GET',
+        `/api/v1/admin/medical-pending-completions/${duplicateMedicalDatePendingResponse.json().id}`,
+      );
+      assert.equal(stillOpenMedicalPending.json().status, 'pending');
+      await request(
+        'POST',
+        `/api/v1/admin/medical-pending-completions/${duplicateMedicalDatePendingResponse.json().id}/cancel`,
+        { reason: 'Duplicate medical date test cleanup.' },
+      );
+
+      const futureMedicalPendingResponse = await request(
+        'POST',
+        '/api/v1/admin/medical-pending-completions',
+        {
+          employeeId: expiringEmployee.id,
+          medicalId: noSiteMedical.id,
+          comment: 'Future-dated medical confirmation.',
+        },
+      );
+      assert.equal(futureMedicalPendingResponse.statusCode, 201);
+      assert.equal(futureMedicalPendingResponse.json().validityMonthsSnapshot, 12);
+      await request(
+        'POST',
+        `/api/v1/admin/medicals/${noSiteMedical.id}/archive`,
+      );
+      const finalizedMedicalPendingResponse = await request(
+        'POST',
+        `/api/v1/admin/medical-pending-completions/${futureMedicalPendingResponse.json().id}/finalize`,
+        { completedOn: '2030-02-28' },
+      );
+      assert.equal(finalizedMedicalPendingResponse.statusCode, 200);
+      assert.equal(finalizedMedicalPendingResponse.json().status, 'finalized');
+      assert.equal(
+        finalizedMedicalPendingResponse.json().completion.expiresOn,
+        '2031-02-28',
+      );
+      assert.equal(
+        finalizedMedicalPendingResponse.json().completion.comment,
+        'Future-dated medical confirmation.',
+      );
+
+      const correctedMedicalCompletionResponse = await request(
+        'POST',
+        `/api/v1/admin/medical-completions/${noSiteMedicalCompletionResponse.json().id}/correct-dates`,
+        {
+          completedOn: '2026-05-15',
+          expiresOn: '2028-01-31',
+          reason: '  Corrected from the medical certificate.  ',
+        },
+      );
+      assert.equal(correctedMedicalCompletionResponse.statusCode, 200);
+      const correctedMedicalCompletion = correctedMedicalCompletionResponse.json();
+      assert.equal(
+        correctedMedicalCompletion.correctsCompletionId,
+        noSiteMedicalCompletionResponse.json().id,
+      );
+      assert.equal(correctedMedicalCompletion.expiryManuallySet, true);
+      assert.equal(correctedMedicalCompletion.completedOn, '2026-05-15');
+      assert.equal(correctedMedicalCompletion.expiresOn, '2028-01-31');
+      assert.equal(correctedMedicalCompletion.validityMonthsApplied, 12);
+      assert.equal(
+        correctedMedicalCompletion.comment,
+        'Original no-site medical certificate.',
+      );
+      assert.equal(correctedMedicalCompletion.employee.id, employee.id);
+      assert.equal(correctedMedicalCompletion.medical.id, noSiteMedical.id);
+
+      const correctedMedicalSource = await request(
+        'GET',
+        `/api/v1/admin/medical-completions/${noSiteMedicalCompletionResponse.json().id}`,
+      );
+      assert.ok(correctedMedicalSource.json().voidedAt);
+      assert.equal(
+        correctedMedicalSource.json().voidReason,
+        'Corrected from the medical certificate.',
+      );
+      await assert.rejects(
+        prisma.medicalCompletion.update({
+          where: { id: correctedMedicalCompletion.id },
+          data: { completedOn: new Date('2026-05-16T00:00:00.000Z') },
+        }),
+        /Completion facts are immutable/,
+      );
+      await request(
+        'POST',
+        `/api/v1/admin/medicals/${noSiteMedical.id}/restore`,
+      );
+
+      const finalizedMedicalCompletionDetail = await request(
+        'GET',
+        `/api/v1/admin/medical-completions/${finalizedMedicalPendingResponse.json().completionId}`,
+      );
+      assert.equal(finalizedMedicalCompletionDetail.statusCode, 200);
+      assert.equal(
+        finalizedMedicalCompletionDetail.json().validityMonthsApplied,
+        12,
+      );
+
+      const pendingMedicalList = await request(
+        'GET',
+        `/api/v1/admin/medical-pending-completions?employeeId=${employee.id}&medicalId=${medical.id}&search=Calendar`,
+      );
+      assert.equal(pendingMedicalList.statusCode, 200);
+      assert.equal(pendingMedicalList.json().total, 1);
+      assert.equal(pendingMedicalList.json().items[0].id, pendingMedical.id);
 
       const readinessResponse = await request(
         'GET',
@@ -671,6 +1161,10 @@ test(
       assert.equal(medicalReadinessResponse.statusCode, 200);
       const medicalReadiness = medicalReadinessResponse.json();
       assert.equal(JSON.stringify(medicalReadiness).includes('comment'), false);
+      const pendingEmployeeMedicalSummary = medicalReadiness.find(
+        (row: { employee: { id: string } }) => row.employee.id === employee.id,
+      );
+      assert.equal(pendingEmployeeMedicalSummary.status, 'incomplete');
       const compliantMedicalSummary = medicalReadiness.find(
         (row: { employee: { id: string } }) =>
           row.employee.id === compliantEmployee.id,
@@ -699,6 +1193,18 @@ test(
       assert.equal(
         compliantEmployeeDetail.json().medicalCompletions[0].comment,
         'Medical certificate verified.',
+      );
+
+      const employeeWithPendingMedical = await request(
+        'GET',
+        `/api/v1/admin/employees/${employee.id}`,
+      );
+      assert.deepEqual(employeeWithPendingMedical.json().pendingCompletions, []);
+      assert.deepEqual(
+        employeeWithPendingMedical
+          .json()
+          .pendingMedicalCompletions.map((pending: { id: string }) => pending.id),
+        [pendingMedical.id],
       );
 
       const siteDetailWithMedical = await request(
@@ -764,6 +1270,10 @@ test(
         JSON.stringify(selfMedicalReadiness).includes('comment'),
         false,
       );
+      assert.equal(
+        JSON.stringify(selfMedicalReadiness).includes('pendingCompletion'),
+        false,
+      );
       const employeeSiteMedicalsResponse = await app.inject({
         method: 'GET',
         url: `/api/v1/sites/${site.id}/medicals`,
@@ -783,6 +1293,8 @@ test(
         '/api/v1/admin/employees',
         '/api/v1/admin/medicals',
         '/api/v1/admin/medical-completions',
+        '/api/v1/admin/pending-completions',
+        '/api/v1/admin/medical-pending-completions',
       ]) {
         const response = await app.inject({
           method: 'GET',
@@ -791,6 +1303,125 @@ test(
         });
         assert.equal(response.statusCode, 403);
       }
+
+      const cancelledPendingMedicalResponse = await request(
+        'POST',
+        `/api/v1/admin/medical-pending-completions/${pendingMedical.id}/cancel`,
+        { reason: 'The medical was assigned to the wrong employee.' },
+      );
+      assert.equal(cancelledPendingMedicalResponse.statusCode, 200);
+      assert.equal(cancelledPendingMedicalResponse.json().status, 'cancelled');
+      assert.equal(cancelledPendingMedicalResponse.json().completionId, null);
+      const resolvedMedicalPendingList = await request(
+        'GET',
+        `/api/v1/admin/medical-pending-completions?employeeId=${employee.id}&includeResolved=true`,
+      );
+      assert.equal(resolvedMedicalPendingList.statusCode, 200);
+      assert.equal(resolvedMedicalPendingList.json().total, 1);
+      assert.equal(resolvedMedicalPendingList.json().items[0].status, 'cancelled');
+
+      const correctionSiteResponse = await request('POST', '/api/v1/admin/sites', {
+        name: 'Manual Expiry Readiness Site',
+        timeZone: 'America/St_Johns',
+      });
+      assert.equal(correctionSiteResponse.statusCode, 201);
+      const correctionSite = correctionSiteResponse.json();
+      const correctionCourseResponse = await request(
+        'POST',
+        '/api/v1/admin/courses',
+        {
+          name: 'Manual Expiry Readiness Course',
+          validityMonths: 1,
+          siteIds: [correctionSite.id],
+        },
+      );
+      assert.equal(correctionCourseResponse.statusCode, 201);
+      const correctionCourse = correctionCourseResponse.json();
+      const correctionEmployee = await prisma.employee.create({
+        data: {
+          displayName: 'Manual Expiry Employee',
+          email: 'manual.expiry.employee@example.com',
+          cognitoSubject: '20000000-0000-4000-8000-000000000205',
+        },
+      });
+      const automaticExpiryCompletionResponse = await request(
+        'POST',
+        '/api/v1/admin/completions',
+        {
+          employeeId: correctionEmployee.id,
+          courseId: correctionCourse.id,
+          completedOn: '2026-01-01',
+          comment: 'Manual expiry readiness proof.',
+        },
+      );
+      assert.equal(automaticExpiryCompletionResponse.statusCode, 201);
+      assert.equal(automaticExpiryCompletionResponse.json().expiresOn, '2026-02-01');
+
+      const manualExpiryCompletionResponse = await request(
+        'POST',
+        `/api/v1/admin/completions/${automaticExpiryCompletionResponse.json().id}/correct-dates`,
+        {
+          completedOn: '2026-01-01',
+          expiresOn: '2026-12-31',
+          reason: 'Certificate specifies a later expiry date.',
+        },
+      );
+      assert.equal(manualExpiryCompletionResponse.statusCode, 200);
+      const manualExpiryCompletion = manualExpiryCompletionResponse.json();
+      assert.equal(manualExpiryCompletion.expiryManuallySet, true);
+
+      const correctionSiteReadinessResponse = await request(
+        'GET',
+        `/api/v1/sites/${correctionSite.id}/readiness?asOf=2026-06-05`,
+      );
+      assert.equal(correctionSiteReadinessResponse.statusCode, 200);
+      const correctionSiteEmployeeReadiness = correctionSiteReadinessResponse
+        .json()
+        .find(
+          (summary: { employee: { id: string } }) =>
+            summary.employee.id === correctionEmployee.id,
+        );
+      assert.equal(correctionSiteEmployeeReadiness.status, 'compliant');
+      assert.equal(
+        correctionSiteEmployeeReadiness.courses[0].completion.id,
+        manualExpiryCompletion.id,
+      );
+      assert.equal(
+        correctionSiteEmployeeReadiness.courses[0].completion.expiresOn,
+        '2026-12-31',
+      );
+
+      const correctionEmployeeReadinessResponse = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me/readiness?asOf=2026-06-05',
+        headers: {
+          'x-demo-user-role': 'employee',
+          'x-demo-user-subject': correctionEmployee.cognitoSubject,
+        },
+      });
+      assert.equal(correctionEmployeeReadinessResponse.statusCode, 200);
+      const selfCorrectionSiteReadiness = correctionEmployeeReadinessResponse
+        .json()
+        .find(
+          (summary: { site: { id: string } }) =>
+            summary.site.id === correctionSite.id,
+        );
+      assert.equal(selfCorrectionSiteReadiness.status, 'compliant');
+      assert.equal(
+        selfCorrectionSiteReadiness.courses[0].completion.id,
+        manualExpiryCompletion.id,
+      );
+      assert.equal(
+        selfCorrectionSiteReadiness.courses.some(
+          (requirement: { completion: { id: string } | null }) =>
+            requirement.completion?.id === automaticExpiryCompletionResponse.json().id,
+        ),
+        false,
+      );
+      await request(
+        'POST',
+        `/api/v1/admin/employees/${correctionEmployee.id}/archive`,
+      );
 
       const unlinkedResponse = await app.inject({
         method: 'GET',
@@ -1268,6 +1899,21 @@ test(
       assert.equal(medicalRenewalResponse.statusCode, 201);
       assert.equal(medicalRenewalResponse.json().expiresOn, '2026-08-01');
       assert.equal(medicalRenewalResponse.json().validityMonthsApplied, 2);
+
+      const duplicateMedicalCorrectionResponse = await request(
+        'POST',
+        `/api/v1/admin/medical-completions/${medicalCompletionResponse.json().id}/correct-dates`,
+        {
+          completedOn: '2026-06-01',
+          expiresOn: '2027-06-01',
+          reason: 'Duplicate medical corrected date rollback test.',
+        },
+      );
+      assert.equal(duplicateMedicalCorrectionResponse.statusCode, 409);
+      assert.equal(
+        duplicateMedicalCorrectionResponse.json().code,
+        'MEDICAL_COMPLETION_EXISTS',
+      );
       const originalMedicalCompletion = await prisma.medicalCompletion.findUnique({
         where: { id: medicalCompletionResponse.json().id },
       });
@@ -1276,6 +1922,7 @@ test(
         '2026-06-30',
       );
       assert.equal(originalMedicalCompletion?.validityMonthsApplied, 1);
+      assert.equal(originalMedicalCompletion?.voidedAt, null);
 
       await request(
         'POST',

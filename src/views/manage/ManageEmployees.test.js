@@ -56,6 +56,8 @@ function mockEmployee(employee) {
     ...employee,
     completions: employee.completions || [],
     medicalCompletions: employee.medicalCompletions || [],
+    pendingCompletions: employee.pendingCompletions || [],
+    pendingMedicalCompletions: employee.pendingMedicalCompletions || [],
   });
 }
 
@@ -387,5 +389,45 @@ describe('ManageEmployees', () => {
     expect(wrapper.text()).toContain('Training completion history');
     expect(wrapper.text()).toContain('Medical completion history');
     expect(wrapper.text()).toContain('Fitness to Work');
+  });
+
+  it('renders separate pending-date sections with direct add-date links', async () => {
+    mocks.getEmployee.mockResolvedValue({
+      ...employeeFixture(),
+      completions: [],
+      medicalCompletions: [],
+      pendingCompletions: [
+        {
+          id: 'pending-training-1',
+          course: { id: 'course-1', name: 'Fall Arrest' },
+          createdAt: '2026-08-20T12:00:00.000Z',
+          status: 'pending',
+        },
+      ],
+      pendingMedicalCompletions: [
+        {
+          id: 'pending-medical-1',
+          medical: { id: 'medical-1', name: 'Fitness to Work' },
+          createdAt: '2026-08-21T12:00:00.000Z',
+          status: 'pending',
+        },
+      ],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('tbody tr').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Training pending dates');
+    expect(wrapper.text()).toContain('Medical pending dates');
+    expect(wrapper.text()).toContain('Fall Arrest');
+    expect(wrapper.text()).toContain('Fitness to Work');
+    expect(wrapper.findAll('.status-badge').map((badge) => badge.text())).toContain(
+      'Pending date',
+    );
+
+    const addDateLinks = wrapper.findAll('.secondary-action--compact');
+    expect(addDateLinks).toHaveLength(2);
   });
 });

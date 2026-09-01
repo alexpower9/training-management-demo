@@ -10,6 +10,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save']);
 
 function requestClose() {
+  if (props.saving) return;
   if (props.dirty && !window.confirm('Discard your unsaved changes?')) return;
   emit('close');
 }
@@ -36,11 +37,25 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div v-if="open" class="drawer-layer">
-      <button class="drawer-backdrop" type="button" aria-label="Close form" @click="requestClose" />
+      <button
+        class="drawer-backdrop"
+        type="button"
+        aria-label="Close form"
+        :disabled="saving"
+        @click="requestClose"
+      />
       <aside class="form-drawer" role="dialog" aria-modal="true" :aria-label="title">
         <header class="drawer-header">
           <h2>{{ title }}</h2>
-          <button class="icon-button" type="button" aria-label="Close" @click="requestClose">×</button>
+          <button
+            class="icon-button"
+            type="button"
+            aria-label="Close"
+            :disabled="saving"
+            @click="requestClose"
+          >
+            ×
+          </button>
         </header>
         <form class="drawer-form" @submit.prevent="emit('save')">
           <div class="drawer-content"><slot /></div>
