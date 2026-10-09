@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --color-page: #f4f6f8;
+  --color-page: #f4f6fa;
   --color-surface: #ffffff;
-  --color-surface-muted: #eef2f5;
-  --color-border: #d9e0e7;
-  --color-border-strong: #bfccd8;
-  --color-text: #18212f;
-  --color-muted: #637083;
-  --color-primary: #163657;
-  --color-primary-soft: #e9f0f6;
-  --color-gold: #d6ad4f;
-  --color-gold-soft: #fbf4df;
+  --color-surface-muted: #eef2f9;
+  --color-border: #d9e1ef;
+  --color-border-strong: #bccae1;
+  --color-text: #17243d;
+  --color-muted: #5e6c83;
+  --color-primary: #143d8d;
+  --color-primary-soft: #eaf0fc;
+  --color-accent: #ee3e41;
+  --color-accent-soft: #fff0f0;
   --color-success: #1d7f4f;
   --color-success-soft: #e5f4eb;
   --color-warning: #9c6414;
@@ -88,7 +88,7 @@ strong {
   gap: 1.25rem;
   min-height: 72px;
   padding: 0.7rem clamp(1rem, 4vw, 2.5rem);
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   backdrop-filter: blur(14px);
 }
@@ -100,26 +100,22 @@ strong {
   min-width: 0;
 }
 
-.brand-logo {
-  width: 56px;
-  height: 56px;
-  object-fit: contain;
+.brand-logo-frame {
+  position: relative;
+  width: 108px;
+  height: 72px;
+  overflow: hidden;
   flex: 0 0 auto;
 }
 
-.brand-text {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-}
-
-.brand-name {
-  color: var(--color-primary);
-  font-size: 1.2rem;
-  font-weight: 800;
-  line-height: 1.15;
-  white-space: nowrap;
+.brand-logo {
+  position: absolute;
+  width: 188px;
+  height: 94px;
+  max-width: none;
+  top: -11px;
+  left: -40px;
+  object-fit: contain;
 }
 
 .app-nav {
@@ -154,20 +150,6 @@ strong {
   color: var(--color-primary);
   background: var(--color-surface);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
-}
-
-.sign-out-button {
-  padding: 0.45rem 0;
-  color: var(--color-muted);
-  background: transparent;
-  border: 0;
-  font-size: 0.84rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.sign-out-button:hover {
-  color: var(--color-primary);
 }
 
 .app-main {
@@ -333,7 +315,7 @@ h2 {
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
-  outline: 2px solid var(--color-gold);
+  outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }
 
@@ -401,7 +383,7 @@ h2 {
 }
 
 .data-table--interactive tbody tr:focus {
-  outline: 2px solid var(--color-gold);
+  outline: 2px solid var(--color-accent);
   outline-offset: -2px;
 }
 
@@ -513,7 +495,7 @@ h2 {
 
 .comment-icon-button:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 2px var(--color-gold);
+  box-shadow: 0 0 0 2px var(--color-accent);
 }
 
 .comment-icon-button svg {
@@ -623,29 +605,6 @@ h2 {
 
 .empty-state--compact {
   padding: 0.85rem;
-}
-
-.auth-state {
-  display: grid;
-  min-height: calc(100vh - 160px);
-  place-items: center;
-}
-
-.auth-state__panel {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: min(560px, 100%);
-  padding: 2rem;
-  text-align: center;
-}
-
-.auth-state__panel code {
-  padding: 0.75rem;
-  overflow-wrap: anywhere;
-  color: var(--color-danger);
-  background: var(--color-danger-soft);
-  border-radius: 8px;
 }
 
 .error-banner {
@@ -1137,28 +1096,6 @@ h2 {
   border-top: 1px solid var(--color-border);
 }
 
-.account-panel {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem;
-  background: var(--color-primary-soft);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-}
-
-.account-panel p,
-.account-panel small {
-  display: block;
-  margin-top: 0.3rem;
-  color: var(--color-muted);
-}
-
-.account-panel code {
-  overflow-wrap: anywhere;
-}
-
 @media (max-width: 1100px) {
   .workspace-grid {
     grid-template-columns: 1fr;
@@ -1182,12 +1119,14 @@ h2 {
   }
 
   .app-header {
+    flex-wrap: wrap;
     gap: 0.75rem;
     min-height: 64px;
     padding: 0.5rem 0.75rem;
   }
 
   .header-actions {
+    width: 100%;
     gap: 0.45rem;
   }
 
@@ -1195,25 +1134,27 @@ h2 {
     gap: 0.55rem;
   }
 
-  .brand-name {
-    max-width: 128px;
-    font-size: 0.92rem;
-    white-space: normal;
-  }
-
   .app-nav {
-    width: auto;
+    width: 100%;
   }
 
   .nav-link {
+    flex: 1;
     min-width: 68px;
     padding: 0.45rem 0.55rem;
     font-size: 0.82rem;
   }
 
+  .brand-logo-frame {
+    width: 76px;
+    height: 52px;
+  }
+
   .brand-logo {
-    width: 44px;
-    height: 44px;
+    width: 136px;
+    height: 68px;
+    top: -8px;
+    left: -30px;
   }
 
   .filter-grid,
@@ -1236,14 +1177,15 @@ h2 {
     width: 100%;
   }
 
-  .sign-out-button {
-    display: none;
-  }
-
   .search-toolbar,
   .pagination-controls {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .search-field,
+  .compact-field {
+    flex: 0 1 auto;
   }
 
   .completion-type-switch {
@@ -1277,10 +1219,6 @@ h2 {
 }
 
 @media (max-width: 560px) {
-  .brand-text {
-    display: none;
-  }
-
   .app-header {
     grid-template-columns: auto minmax(0, 1fr) auto;
     display: grid;
@@ -1303,8 +1241,4 @@ h2 {
     min-width: 72px;
   }
 
-  .sign-out-button {
-    min-height: 44px;
-    padding-inline: 0.25rem;
-  }
 }

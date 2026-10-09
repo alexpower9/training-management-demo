@@ -1,108 +1,34 @@
-import { createRouter, createWebHistory } from 'vue-router';
-import { auth, initializeAuth, signIn } from '@/auth/auth';
-import AuthCallback from '@/views/AuthCallback.vue';
-import AuthConfiguration from '@/views/AuthConfiguration.vue';
+import { createRouter, createWebHashHistory } from 'vue-router';
 import Manage from '@/views/Manage.vue';
 import ManageCompletions from '@/views/manage/ManageCompletions.vue';
 import ManageCourses from '@/views/manage/ManageCourses.vue';
 import ManageEmployees from '@/views/manage/ManageEmployees.vue';
-import ManageAdministrators from '@/views/manage/ManageAdministrators.vue';
 import ManageSites from '@/views/manage/ManageSites.vue';
 import ManageMedicals from '@/views/manage/ManageMedicals.vue';
 import Medical from '@/views/Medical.vue';
 import Training from '@/views/Training.vue';
 
-const routes = [
-  {
-    path: '/',
-    redirect: '/training',
-  },
-  {
-    path: '/training',
-    name: 'training',
-    component: Training,
-    meta: {
-      requiresAuth: true,
+export default createRouter({
+  // Hash routes work when GitHub Pages serves the app from a repository subpath.
+  history: createWebHashHistory(import.meta.env.BASE_URL),
+  routes: [
+    { path: '/', redirect: '/training' },
+    { path: '/training', name: 'training', component: Training },
+    { path: '/medical', name: 'medical', component: Medical },
+    {
+      path: '/manage',
+      name: 'manage',
+      component: Manage,
+      children: [
+        { path: '', redirect: { name: 'manage-employees' } },
+        { path: 'employees', name: 'manage-employees', component: ManageEmployees },
+        { path: 'sites', name: 'manage-sites', component: ManageSites },
+        { path: 'sites/:siteId', name: 'manage-site', component: ManageSites },
+        { path: 'courses', name: 'manage-courses', component: ManageCourses },
+        { path: 'medicals', name: 'manage-medicals', component: ManageMedicals },
+        { path: 'completions', name: 'manage-completions', component: ManageCompletions },
+      ],
     },
-  },
-  {
-    path: '/medical',
-    name: 'medical',
-    component: Medical,
-    meta: {
-      requiresAuth: true,
-    },
-  },
-  {
-    path: '/manage',
-    name: 'manage',
-    component: Manage,
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-    },
-    children: [
-      { path: '', redirect: { name: 'manage-employees' } },
-      { path: 'employees', name: 'manage-employees', component: ManageEmployees },
-      { path: 'sites', name: 'manage-sites', component: ManageSites },
-      { path: 'sites/:siteId', name: 'manage-site', component: ManageSites },
-      { path: 'courses', name: 'manage-courses', component: ManageCourses },
-      { path: 'medicals', name: 'manage-medicals', component: ManageMedicals },
-      { path: 'completions', name: 'manage-completions', component: ManageCompletions },
-      {
-        path: 'administrators',
-        name: 'manage-administrators',
-        component: ManageAdministrators,
-        meta: { requiresOwner: true },
-      },
-    ],
-  },
-  {
-    path: '/auth/callback',
-    name: 'auth-callback',
-    component: AuthCallback,
-  },
-  {
-    path: '/auth/configuration',
-    name: 'auth-configuration',
-    component: AuthConfiguration,
-  },
-  {
-    path: '/:pathMatch(.*)*',
-    redirect: '/training',
-  },
-];
-
-const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
-  routes,
+    { path: '/:pathMatch(.*)*', redirect: '/training' },
+  ],
 });
-
-router.beforeEach(async (to) => {
-  await initializeAuth();
-
-  if (to.name === 'auth-callback' || to.name === 'auth-configuration') {
-    return true;
-  }
-
-  if (auth.state.configurationError) {
-    return { name: 'auth-configuration' };
-  }
-
-  if (to.meta.requiresAuth && !auth.state.isAuthenticated) {
-    await signIn(to.fullPath);
-    return false;
-  }
-
-  if (to.meta.requiresAdmin && !auth.canManage.value) {
-    return { name: 'training' };
-  }
-
-  if (to.meta.requiresOwner && !auth.canAdministerAccounts.value) {
-    return { name: 'manage-employees' };
-  }
-
-  return true;
-});
-
-export default router;

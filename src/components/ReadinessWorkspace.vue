@@ -1,6 +1,5 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { auth } from '@/auth/auth';
 import StatusBadge from '@/components/StatusBadge.vue';
 import { formatDate } from '@/data/trainingDemoData';
 import { sortReadiness, statusMeta, summarizeReadiness } from '@/utils/readiness';
@@ -39,14 +38,10 @@ const loading = ref(false);
 const errorMessage = ref('');
 let readinessRequestId = 0;
 
-const canManage = computed(
-  () => auth.state.role === 'admin' || auth.state.role === 'owner',
-);
-const isEmployee = computed(() => auth.state.role === 'employee');
 const hasSelectedSite = computed(() => selectedSiteId.value !== 'all');
 const hasSelectedEmployee = computed(() => selectedEmployeeId.value !== 'all');
 const hasSelectedScope = computed(
-  () => isEmployee.value || hasSelectedSite.value || hasSelectedEmployee.value,
+  () => hasSelectedSite.value || hasSelectedEmployee.value,
 );
 const statusOptions = computed(() =>
   Object.entries(statusMeta).map(([value, meta]) => ({ value, label: meta.label })),
@@ -120,31 +115,16 @@ const selectedSummary = computed(() => {
 onMounted(async () => {
   loading.value = true;
   try {
-    if (isEmployee.value) {
-      siteSummaries.value = (await props.repository.getMyReadiness()).map(normalizeSummary);
-      sites.value = siteSummaries.value.map((summary) => summary.site);
-      return;
-    }
     [employees.value, sites.value] = await Promise.all([
       props.repository.listEmployees(),
       props.repository.listSites(),
     ]);
   } catch (error) {
-    errorMessage.value = accountErrorMessage(error);
+    errorMessage.value = error.message;
   } finally {
     loading.value = false;
   }
 });
-
-function accountErrorMessage(error) {
-  if (error.code === 'EMPLOYEE_ACCOUNT_NOT_LINKED') {
-    return 'Your account is not linked to an employee record. Contact an administrator.';
-  }
-  if (error.code === 'EMPLOYEE_ACCOUNT_INACTIVE') {
-    return 'Your employee record is inactive. Contact an administrator.';
-  }
-  return error.message;
-}
 
 function prepareReadinessLoad() {
   const requestId = ++readinessRequestId;
@@ -212,23 +192,12 @@ async function loadEmployeeReadiness(employeeId) {
 }
 
 watch(selectedSiteId, (siteId) => {
-  if (isEmployee.value) {
-    selectedRequirementId.value = 'all';
-    selectedSummaryId.value = null;
-    siteRequirements.value = siteId === 'all'
-      ? []
-      : summaryRows(
-          siteSummaries.value.find((summary) => summary.site.id === siteId) || {},
-        ).map((row) => row[objectKey.value]);
-    return;
-  }
   if (siteId !== 'all') return loadSiteReadiness(siteId);
   if (hasSelectedEmployee.value) return loadEmployeeReadiness(selectedEmployeeId.value);
   clearReadiness();
 });
 
 watch(selectedEmployeeId, (employeeId) => {
-  if (!canManage.value) return;
   selectedSummaryId.value = null;
   if (hasSelectedSite.value) return;
   if (employeeId !== 'all') return loadEmployeeReadiness(employeeId);
@@ -241,7 +210,7 @@ watch([selectedRequirementId, selectedStatus], () => {
 
 function resetFilters() {
   selectedSiteId.value = 'all';
-  if (canManage.value) selectedEmployeeId.value = 'all';
+  selectedEmployeeId.value = 'all';
   selectedRequirementId.value = 'all';
   selectedStatus.value = 'all';
   selectedSummaryId.value = null;
@@ -297,11 +266,11 @@ function expiryText(row) {
         <label class="field">
           <span>Site</span>
           <select v-model="selectedSiteId" aria-label="Site">
-            <option value="all">{{ isEmployee ? 'All sites' : 'Select a site' }}</option>
+            <option value="all">Select a site</option>
             <option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }}</option>
           </select>
         </label>
-        <label v-if="canManage" class="field">
+        <label class="field">
           <span>Employee</span>
           <select v-model="selectedEmployeeId" aria-label="Employee">
             <option value="all">All employees</option>
@@ -329,11 +298,15 @@ function expiryText(row) {
     <div v-if="errorMessage" class="error-banner" role="alert">{{ errorMessage }}</div>
     <div v-if="loading" class="panel loading-state" role="status">Loading {{ domainLabel.toLowerCase() }} readiness...</div>
 
-    <div v-else-if="hasSelectedScope" class="workspace-grid">
+    <div v-else-if="!hasSelectedScope" class="panel empty-state">
+      <strong>Explore {{ domainLabel.toLowerCase() }} readiness</strong>
+      <p>Select a site to see all employees, or select an employee to review every site.</p>
+    </div>
+    <div v-else class="workspace-grid">
       <section class="panel panel--large">
         <div class="panel-header">
           <div>
-            <h2>{{ isEmployee ? `My ${domainLabel.toLowerCase()} readiness` : `Employee ${domainLabel.toLowerCase()} readiness` }}</h2>
+            <h2>Employee {{ domainLabel.toLowerCase() }} readiness</h2>
             <p>{{ filteredSummaries.length }} {{ selectedRequirementId === 'all' ? 'site assignments' : `${itemLabelLower} records` }} match your filters.</p>
           </div>
         </div>
@@ -343,7 +316,7 @@ function expiryText(row) {
               <tr>
                 <th>Employee</th><th>Site</th><th>Required</th>
                 <th>{{ selectedRequirementId === 'all' ? `${domainLabel} status` : `${itemLabel} status` }}</th>
-                <th>Site access</th><th>Next action</th>
+                <th>Next action</th>
               </tr>
             </thead>
             <tbody>
@@ -360,10 +333,6 @@ function expiryText(row) {
                 <td><strong>{{ summary.site.name }}</strong><span>{{ summary.site.timeZone }}</span></td>
                 <td><strong>{{ summary.completedCount }} / {{ summary.requiredCount }}</strong><span>{{ summary.requiredCount ? 'requirements current' : `no ${itemLabelLower} requirements` }}</span></td>
                 <td><StatusBadge :status="summary.status" /></td>
-                <td>
-                  <strong>{{ summary.combinedAccess?.eligible ? 'Eligible' : 'Not eligible' }}</strong>
-                  <StatusBadge :status="summary.combinedAccess?.status" />
-                </td>
                 <td>{{ nextAction(summary) }}</td>
               </tr>
             </tbody>
@@ -375,7 +344,7 @@ function expiryText(row) {
       <aside class="panel detail-panel">
         <div class="panel-header">
           <div>
-            <h2>{{ isEmployee ? `${domainLabel} detail` : 'Employee detail' }}</h2>
+            <h2>Employee detail</h2>
             <p v-if="selectedSummary">{{ selectedSummary.employee.name }} at {{ selectedSummary.site.name }}</p>
             <p v-else>Select a row to inspect required {{ itemPlural }}.</p>
           </div>

@@ -7,6 +7,8 @@ import tailwindcss from "@tailwindcss/vite"
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Relative assets work at both / and a GitHub Pages repository subpath.
+  base: './',
   plugins: [
     vue(),
     vueDevTools(),
@@ -15,14 +17,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
-    },
-  },
-  server: {
-    proxy: {
-      '/api': {
-        target: process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3000',
-        changeOrigin: true,
-      },
     },
   },
   test: {

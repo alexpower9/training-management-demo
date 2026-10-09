@@ -1,209 +1,103 @@
-# NME Training and Medical Compliance
+# Ledcor Compliance Demo
 
-Internal training and medical-compliance application for Northern Mining Equipment.
+A standalone demo of the Ledcor Group training and medical
+compliance app. Open it and use Training, Medical, and Manage without signing in.
+All records are fictional, and changes are saved in the current browser.
 
-## Application Structure
+## Run locally
 
-- `src/`: Vue Training, Medical, and management workspaces with Cognito authentication.
-- `server/`: Fastify TypeScript API with Cognito JWT verification and Prisma.
-- `server/prisma/`: Ten-table PostgreSQL schema, additive migrations, and canonical demo seed.
-- `deploy/`: Nginx and systemd templates for an EC2 deployment.
-
-The browser never connects directly to PostgreSQL. Production traffic follows:
-
-```text
-Vue client -> Nginx /api proxy -> Fastify API -> private RDS PostgreSQL
-```
-
-## Local Setup
-
-Install all frontend and API workspace dependencies:
+Use Node.js 24 LTS (minimum 22.12):
 
 ```sh
-npm install
-```
-
-Copy `.env.example` to `.env` for the frontend and `server/.env.example` to
-`server/.env`. Development authentication defaults to an administrator.
-Training, Medical, and Management use the API by default so management changes
-are immediately reflected in site readiness.
-
-Start PostgreSQL 17, apply the migration, and seed the canonical dataset:
-
-```sh
-npm run db:up
-npm run prisma:generate
-npm run prisma:migrate
-npm run prisma:seed
-```
-
-Start the API and frontend in separate terminals:
-
-```sh
-npm run dev:api
+npm ci
 npm run dev
 ```
 
-The Training and Medical workspaces are available at `/training` and `/medical`.
-The management workspace is available at `/manage`.
+Open the local URL printed by Vite. No environment file, database server, or
+cloud account is required.
 
-Medical catalogue, site-requirement, and completion records use independent
-tables while sharing employees and sites with Training. The canonical seed
-deliberately starts the Medical catalogue empty. Site access requires every
-configured course and medical to be current; a domain with no requirements is
-neutral, while a site with no requirements in either domain remains ineligible.
+To preview the static build:
 
-Administrators and owners may also save a per-employee Training or Medical
-entry with its completion date pending. Pending-date records are kept apart
-from immutable completion history, never satisfy readiness, and can later be
-finalized into a dated completion or cancelled with a retained reason.
-Administrators and owners can also correct a saved completion and expiration
-date; the application voids the original immutable row and creates a linked
-replacement so the full correction history remains auditable.
+```sh
+npm run build
+npm run preview
+```
 
-## Verification
+## Add your mock data
 
-Run the database-independent suites and production builds:
+Use **Manage** to add employees, sites, courses, medicals, and completion records.
+Course and medical assignments determine each site's requirements. Training and
+Medical readiness reflect these saved changes, including pending dates and date
+corrections.
+
+Sample dates are generated relative to the first load so the demo includes
+current, expiring, overdue, and missing requirements. Add and edit records using
+the regular management tabs.
+
+The dummy database is stored in `localStorage`. It survives refreshes but is
+specific to this browser and website address. Visitors each get their own copy;
+changes are not shared between people or devices. Clearing browser storage
+removes local edits. Use fictional data only: this demo has no access controls.
+
+The initial sample data is defined in `src/data/`. To give every new visitor a
+custom dataset, update the seed in the source and publish a new build. Existing
+visitors can clear this site's browser storage to load the updated sample data.
+
+See [the demo data model](docs/database-design.md) and
+[management workflows](docs/manage-interface-design.md).
+
+## Publish to GitHub Pages
+
+This project includes `.github/workflows/pages.yml`, which tests, builds, and
+publishes the demo. The removed production deployment system is not needed.
+
+1. Create an empty GitHub repository for this demo. A public repository supports
+   Pages on GitHub Free; private repositories require a plan that includes Pages.
+2. Connect this folder to it and push the demo to `main`. For example, replace
+   `YOUR_ACCOUNT/YOUR_REPOSITORY` below:
+
+   ```sh
+   git add .
+   git commit -m "Convert app to standalone demo"
+   git remote add origin https://github.com/YOUR_ACCOUNT/YOUR_REPOSITORY.git
+   git push -u origin HEAD:main
+   ```
+
+3. In the repository's **Settings → Pages**, set **Source** to **GitHub Actions**.
+4. Open **Actions → Publish demo to GitHub Pages → Run workflow** and select
+   `main`. Future pushes to `main` publish automatically.
+5. After the workflow succeeds, open the URL shown in **Settings → Pages** or
+   the workflow's deployment. Normally it is
+   `https://YOUR_ACCOUNT.github.io/YOUR_REPOSITORY/`.
+
+If your default branch has another name, update the `push.branches` setting in
+`.github/workflows/pages.yml`. No secrets or backend configuration are needed.
+Relative asset paths and hash routing support repository subpaths and allow
+links such as `/#/manage/employees` to survive refreshes.
+
+References: [Vite deployment guide](https://vite.dev/guide/static-deploy.html#github-pages)
+and [GitHub Pages workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+
+## Verify changes
 
 ```sh
 npm test
-npm run test:api
-npm run prisma:generate
-npm run build:all
-```
-
-PostgreSQL integration and Playwright tests use the isolated
-`nme_training_test` database on port 5433:
-
-```sh
-npm run db:test:up
-export TEST_DATABASE_URL='postgresql://postgres:postgres@localhost:5433/nme_training_test?schema=public'
-npm run test:integration
 npx playwright install chromium
 npm run test:e2e
+npm run build
 ```
 
-The integration and browser setup scripts refuse destructive migration resets
-unless the configured database name is exactly `nme_training_test`.
+Browser tests run against the static build under `/nme-demo/`, including saved
+mock data and reloads. They do not need a separate API or database.
 
-## Authentication
+## Project structure
 
-The application supports two modes:
+- `src/components/`, `src/views/`: readiness and management interface.
+- `src/data/`: sample data and the browser database.
+- `src/services/`: local record management and readiness calculations.
+- `src/router/`: hash routes for static hosting.
+- `e2e/`: browser tests for the standalone demo.
+- `.github/workflows/pages.yml`: GitHub Pages publishing workflow.
 
-- `development`: local employee/admin/owner role selected with `VITE_DEMO_ROLE`.
-- `cognito`: authorization-code flow with PKCE through Amazon Cognito.
-
-Production defaults to Cognito and refuses to expose application data when Cognito settings are
-missing. Cognito groups are `employee`, `admin`, and `owner`; accounts outside all three groups are
-rejected. Owner takes precedence over admin, which takes precedence over employee. The API
-independently verifies every access token and requires admin or owner access for broad employee
-readiness, completion history, and record-management operations.
-
-Adding an employee requires a display name and email. Administrators and owners create the
-employee's Cognito account, assign it only to the `employee` group, send Cognito's
-temporary-password invitation, and store the immutable Cognito `sub` on the employee record.
-Every employee row is initially created with a Cognito account. Manage Employees reads account
-setup state live from the `employee` group and matches it by `sub`; Cognito subjects are never
-returned by employee-management API responses. `FORCE_CHANGE_PASSWORD` means the invitation is
-pending, while `CONFIRMED` means account setup is complete, not that the employee has used the
-application.
-
-Administrators and owners can resend an invitation for an active employee whose invitation is
-pending. Cognito generates a new temporary password, restarts its validity period, and supersedes
-the previous temporary password. The API coalesces concurrent requests and applies a short resend
-attempt cooldown. Archived employees and disabled, confirmed, missing, mismatched, or
-otherwise ineligible accounts cannot be resent. If the Cognito group lookup fails, employee records
-remain available with account status shown as unavailable. The API calls Cognito for invitation
-delivery; it does not call Amazon SES directly.
-
-Development authentication emulates newly created Cognito accounts only in the running API
-process. Seeded employees show Status unavailable, and restarting the API clears locally emulated
-account status and resend eligibility. Production Cognito state is not affected.
-
-The owner can also invite new administrators from Manage Administrators. Active employees use
-`/api/v1/me/readiness` and `/api/v1/me/medical-readiness`, which return only their own readiness
-across active sites. Missing, unmatched, or archived employee identities are denied without
-receiving compliance data.
-
-For local employee mode, use:
-
-```dotenv
-VITE_AUTH_MODE=development
-VITE_DEMO_ROLE=employee
-VITE_DEMO_SUBJECT=20000000-0000-4000-8000-000000000001
-```
-
-The canonical development seed links that subject to the first demo employee.
-
-## Production Build
-
-Build both applications:
-
-```sh
-npm run prisma:generate
-cp .env.production.example .env.production
-# Replace every placeholder in .env.production.
-npm run build:production
-```
-
-The production build preflight rejects development authentication, placeholder
-Cognito values, and invalid callback URLs.
-
-Local development can use `DATABASE_URL`. Production must retrieve
-least-privilege runtime credentials using `DATABASE_SECRET_ARN`; remove any
-persistent direct URL from API environment files, systemd overrides, and shell
-profiles. Production startup rejects configuring both sources. Production
-migrations require a distinct
-`MIGRATION_DATABASE_SECRET_ARN` and database-owner role. The protected
-migration command applies migrations, grants the runtime role only the
-documented ten-table DML allowlist, and reconnects with the runtime secret to
-verify those privileges before the API restarts. Secret-based production
-connections also require `RDS_CA_CERT_PATH` and use strict certificate
-verification. Keep this application in a dedicated database and `public`
-schema on private RDS subnets, with port 5432 allowed only from approved
-application or migration runners.
-
-For the strongest credential boundary, run migrations in a protected
-CI/CodeBuild job with its own IAM role and let EC2 retrieve only the runtime
-secret. The same-EC2 one-shot migration unit is supported as an initial
-fallback and runs under a separate `nme-migration` system identity.
-
-See [Production Deployment Runbook](docs/production-deployment-runbook.md) for
-the complete local, staging, Cognito, RDS, EC2, DNS, TLS, monitoring, backup,
-and launch sequence.
-
-## EC2 Redeployment
-
-After the initial EC2 provisioning in the production runbook, install the
-fixed-purpose systemd units and opt-in Git hooks:
-
-```sh
-npm run deploy:ec2:setup
-npm run deploy:ec2
-```
-
-When migrations run only in protected CI/CodeBuild and no migration credential
-exists on EC2, use `NME_EC2_EXTERNAL_MIGRATIONS=1 npm run deploy:ec2:setup`,
-then deploy with the migration-skip and compatibility-confirmation guards below.
-
-In same-host migration mode, future fast-forward updates can be fetched and
-deployed with:
-
-```sh
-npm run deploy:ec2:update
-```
-
-When a protected migration job has already succeeded for the exact release,
-first pull with `NME_SKIP_AUTO_DEPLOY=1 git pull --ff-only`, then deploy the
-application with
-`NME_DEPLOY_SKIP_MIGRATIONS=1 NME_SCHEMA_COMPATIBILITY_CONFIRMED=1 NME_EXTERNAL_MIGRATION_COMMIT=$(git rev-parse HEAD) npm run deploy:ec2`. Use the same guard for an
-application rollback only after verifying the older artifact against the
-currently migrated schema; database migrations are not rolled back with the
-application. External-migration setup disables automatic Git-hook deployment
-because every release needs an approved receipt for its exact commit.
-
-In same-host mode, the installed hooks pin the current branch as the production
-branch and run after a successful `git pull` on it or a switch back to it.
-External mode deliberately skips those automatic deployments. Deployments require
-a clean worktree, are serialized with a lock, and record the successful commit
-in `.deployment/deployments.log`.
+The production API, database migrations, cloud deployment scripts, authentication,
+and account invitations have been removed from this demo clone.

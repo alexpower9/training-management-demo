@@ -1,18 +1,16 @@
 <script setup>
-import logoUrl from '@/assets/nme-logo.png';
-import { auth, signOut } from '@/auth/auth';
+import logoUrl from '@/assets/ledcor-logo.jpg';
 </script>
 
 <template>
   <header class="app-header">
-    <RouterLink to="/training" class="brand-link" aria-label="Northern Mining Equipment compliance">
-      <img :src="logoUrl" alt="Northern Mining Equipment" class="brand-logo" />
-      <span class="brand-text">
-        <span class="brand-name">Northern Mining Equipment</span>
+    <RouterLink to="/training" class="brand-link" aria-label="Ledcor Group compliance">
+      <span class="brand-logo-frame">
+        <img :src="logoUrl" alt="Ledcor Group" class="brand-logo" />
       </span>
     </RouterLink>
 
-    <div v-if="auth.state.isAuthenticated" class="header-actions">
+    <div class="header-actions">
       <nav class="app-nav" aria-label="Primary navigation">
         <RouterLink to="/training" class="nav-link" active-class="is-active">
           Training
@@ -21,7 +19,6 @@ import { auth, signOut } from '@/auth/auth';
           Medical
         </RouterLink>
         <RouterLink
-          v-if="auth.canManage.value"
           to="/manage"
           class="nav-link"
           active-class="is-active"
@@ -29,15 +26,6 @@ import { auth, signOut } from '@/auth/auth';
           Manage
         </RouterLink>
       </nav>
-
-      <button
-        v-if="!auth.isDevelopmentAuth"
-        type="button"
-        class="sign-out-button"
-        @click="signOut"
-      >
-        Sign out
-      </button>
     </div>
   </header>
 </template>

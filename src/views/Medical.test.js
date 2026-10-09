@@ -3,15 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Medical from '@/views/Medical.vue';
 
 const mocks = vi.hoisted(() => ({
-  authState: { role: 'admin' },
-  getMyReadiness: vi.fn(),
   listEmployees: vi.fn(),
   listSites: vi.fn(),
   listSiteRequirements: vi.fn(),
   getSiteReadiness: vi.fn(),
 }));
 
-vi.mock('@/auth/auth', () => ({ auth: { state: mocks.authState } }));
 vi.mock('@/services/medicalRepository', () => ({ medicalRepository: mocks }));
 
 function medicalSummary(employee, site, options = {}) {
@@ -48,7 +45,6 @@ describe('Medical', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authState.role = 'admin';
     mocks.listEmployees.mockResolvedValue([employee]);
     mocks.listSites.mockResolvedValue([site]);
     mocks.listSiteRequirements.mockResolvedValue([]);
@@ -64,8 +60,9 @@ describe('Medical', () => {
 
     expect(wrapper.get('thead').text()).toContain('Medical status');
     expect(wrapper.get('tbody').text()).toContain('No Requirements');
-    expect(wrapper.get('tbody').text()).toContain('Eligible');
     expect(wrapper.get('tbody').text()).toContain('Ready for site access');
+    await wrapper.get('tbody tr').trigger('click');
+    expect(wrapper.get('.detail-panel').text()).toContain('Eligible for site access');
   });
 
   it('keeps combined access authoritative when a Medical filter narrows status', async () => {
@@ -123,25 +120,13 @@ describe('Medical', () => {
 
     expect(wrapper.get('tbody').text()).toContain('Compliant');
     expect(wrapper.get('tbody').text()).toContain('1 / 1');
-    expect(wrapper.get('tbody').text()).toContain('Not eligible');
     expect(wrapper.get('tbody').text()).toContain('Resolve medical requirements');
     expect(wrapper.get('tbody').text()).not.toContain('Respirator Clearance');
     await wrapper.get('tbody tr').trigger('click');
+    expect(wrapper.get('.detail-panel').text()).toContain('Not eligible for site access');
     expect(wrapper.get('.detail-panel').text()).toContain(
       'Blocked by medical requirements.',
     );
-  });
-
-  it('shows employee accounts only their own Medical readiness', async () => {
-    mocks.authState.role = 'employee';
-    mocks.getMyReadiness.mockResolvedValue([medicalSummary(employee, site)]);
-    const wrapper = mount(Medical);
-    await flushPromises();
-
-    expect(mocks.listEmployees).not.toHaveBeenCalled();
-    expect(mocks.getMyReadiness).toHaveBeenCalledOnce();
-    expect(wrapper.find('select[aria-label="Employee"]').exists()).toBe(false);
-    expect(wrapper.text()).toContain('Alex Power');
   });
 
   it('shows a cross-domain expiring warning when Medical has no requirements', async () => {
@@ -162,7 +147,10 @@ describe('Medical', () => {
     await wrapper.get('select[aria-label="Site"]').setValue(site.id);
     await flushPromises();
 
-    expect(wrapper.get('tbody').text()).toContain('Expiring Soon');
     expect(wrapper.get('tbody').text()).toContain('requirement expires soon');
+    await wrapper.get('tbody tr').trigger('click');
+    expect(wrapper.get('.detail-panel .eligibility-strip--warning').text()).toContain(
+      'One or more requirements expire soon.',
+    );
   });
 });

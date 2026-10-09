@@ -1,41 +1,20 @@
 {
-  "name": "nme-fe",
+  "name": "nme-demo",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "server"
-  ],
   "scripts": {
-    "db:up": "docker compose up -d postgres",
-    "db:test:up": "docker compose up -d postgres-test",
-    "db:down": "docker compose down",
     "dev": "vite",
-    "dev:api": "npm run dev --workspace server",
     "build": "vite build",
-    "build:api": "npm run build --workspace server",
-    "build:all": "npm run build && npm run build:api",
-    "build:production": "node scripts/validate-production-env.mjs && npm run prisma:generate && npm run build:all",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:api": "npm run test --workspace server",
-    "db:test:prepare": "npm run test:prepare --workspace server",
-    "test:integration": "npm run test:integration --workspace server",
-    "test:e2e": "npm run db:test:prepare && playwright test",
-    "preview": "vite preview",
-    "deploy:ec2": "bash scripts/deploy-ec2.sh",
-    "deploy:ec2:setup": "bash scripts/setup-ec2-auto-deploy.sh",
-    "deploy:ec2:update": "NME_SKIP_AUTO_DEPLOY=1 git pull --ff-only && npm run deploy:ec2",
-    "migrate:production": "node server/scripts/migrate-production.mjs",
-    "prisma:generate": "npm run prisma:generate --workspace server",
-    "prisma:migrate": "npm run prisma:migrate --workspace server",
-    "prisma:seed": "npm run prisma:seed --workspace server"
+    "test:e2e": "playwright test",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.8",
     "@tailwindcss/vite": "^4.1.8",
     "flowbite": "^3.1.2",
-    "oidc-client-ts": "^3.5.0",
     "vue": "^3.5.13",
     "vue-router": "^4.5.1"
   },
@@ -51,5 +30,8 @@
     "vite": "^6.2.4",
     "vite-plugin-vue-devtools": "^7.7.2",
     "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }
