@@ -101,20 +101,16 @@ strong {
 }
 
 .brand-logo-frame {
-  position: relative;
-  width: 108px;
+  width: 136px;
   height: 72px;
   overflow: hidden;
   flex: 0 0 auto;
 }
 
 .brand-logo {
-  position: absolute;
-  width: 188px;
-  height: 94px;
-  max-width: none;
-  top: -11px;
-  left: -40px;
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
@@ -1146,15 +1142,8 @@ h2 {
   }
 
   .brand-logo-frame {
-    width: 76px;
+    width: 92px;
     height: 52px;
-  }
-
-  .brand-logo {
-    width: 136px;
-    height: 68px;
-    top: -8px;
-    left: -30px;
   }
 
   .filter-grid,

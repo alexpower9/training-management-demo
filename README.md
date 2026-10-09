@@ -1,6 +1,6 @@
-# Ledcor Compliance Demo
+# ECM Compliance Demo
 
-A standalone demo of the Ledcor Group training and medical
+A standalone demo of the ECM training and medical
 compliance app. Open it and use Training, Medical, and Manage without signing in.
 All records are fictional, and changes are saved in the current browser.
 

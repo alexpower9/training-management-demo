@@ -1,12 +1,12 @@
 <script setup>
-import logoUrl from '@/assets/ledcor-logo.jpg';
+import logoUrl from '@/assets/new-logo.png';
 </script>
 
 <template>
   <header class="app-header">
-    <RouterLink to="/training" class="brand-link" aria-label="Ledcor Group compliance">
+    <RouterLink to="/training" class="brand-link" aria-label="ECM compliance">
       <span class="brand-logo-frame">
-        <img :src="logoUrl" alt="Ledcor Group" class="brand-logo" />
+        <img :src="logoUrl" alt="ECM" class="brand-logo" />
       </span>
     </RouterLink>
 
